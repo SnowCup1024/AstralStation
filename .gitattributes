@@ -1,4 +1,9 @@
 * text=auto
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.editorconfig text eol=lf
+*.manifest text eol=lf
+*.slnx text eol=lf
 *.cs text eol=lf
 *.xaml text eol=lf
 *.csproj text eol=lf
