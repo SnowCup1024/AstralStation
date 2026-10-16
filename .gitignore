@@ -1,0 +1,21 @@
+# Build outputs
+**/bin/
+**/obj/
+.build/
+.Build/
+artifacts/
+
+# Local IDE state
+.vs/
+*.user
+*.suo
+
+# Local credentials and user data
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+AppData/
+UserData/
+*.log
