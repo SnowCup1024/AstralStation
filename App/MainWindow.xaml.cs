@@ -42,10 +42,10 @@ public sealed partial class MainWindow : Window
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Root.ActualThemeChanged += (_, _) => Caption();
         Caption();
-        Navigation.SelectedItem = Navigation.MenuItems[1];
+        Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
         desktop.RestoreRequested += Restore;

@@ -33,8 +33,8 @@ public sealed partial class LaunchPage : UserControl
         LibraryList.ItemsSource = library;
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
         session.Changed += Refresh; session.TasksChanged += Reload;
-        AutoClose.IsOn = session.Store.Settings.AutoClose; Tray.IsOn = session.Store.Settings.Tray; CloseToTray.IsOn = session.Store.Settings.CloseToTray; CloseToTray.IsEnabled = Tray.IsOn;
-        try { Login.IsOn = desktop.LoginEnabled; } catch (Exception ex) { ErrorBar.Message = ex.Message; ErrorBar.IsOpen = true; }
+        AutoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0; Tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0; CloseToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0; CloseToTray.IsEnabled = (Tray.SelectedIndex == 1);
+        try { Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; } catch (Exception ex) { ErrorBar.Message = ex.Message; ErrorBar.IsOpen = true; }
         DataPath.Text = session.Store.Root; ready = true; Reload();
     }
     private void Reload()
@@ -87,9 +87,9 @@ public sealed partial class LaunchPage : UserControl
     {
         var task = id is null ? preset ?? new LaunchTask { Path = path ?? "", Name = path is null ? "" : System.IO.Path.GetFileNameWithoutExtension(path), ProcessNames = path?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true ? [System.IO.Path.GetFileNameWithoutExtension(path)] : [] } : Current(id);
         if (task is null) return;
-        var edited = await TaskEditor.Edit(task, dialogs, session, options); if (edited is null) return;
+        var edited = await TaskEditor.Edit(task, dialogs, session, options, id is null); if (edited is null) return;
         var tasks = session.Store.Tasks.Select(t => t.Clone()).ToList(); int index = tasks.FindIndex(t => t.Id == id);
-        if (id is null) tasks.Add(edited); else if (index >= 0) tasks[index] = edited; else return;
+        if (id is null) tasks.AddRange(edited); else if (index >= 0) tasks[index] = edited[0]; else return;
         session.SaveTasks(tasks);
     }
     private async Task Action(string id, string action)
@@ -173,42 +173,19 @@ public sealed partial class LaunchPage : UserControl
         try { var files = await e.DataView.GetStorageItemsAsync(); await Guard(async () => { foreach (var file in files.OfType<StorageFile>().Where(f => new[] { ".exe", ".lnk", ".bat", ".cmd", ".ps1" }.Contains(f.FileType.ToLowerInvariant())).Take(16)) await Edit(null, path: file.Path); }); }
         catch (Exception ex) { await dialogs.Error(ex.Message); } finally { deferral.Complete(); }
     }
-    private async void DetectGames(object sender, RoutedEventArgs e) => await Guard(async () =>
-    {
-        using var cancellation = new CancellationTokenSource(); var label = new TextBlock { Text = "正在检测常用目录、注册表和快捷方式…", TextWrapping = TextWrapping.Wrap }; var list = new ListView { SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 350, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-        list.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
-            <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
-              <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4">
-                <StackPanel Spacing="6"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Path}" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
-              </Border>
-            </DataTemplate>
-            """);
-        var panel = new StackPanel { Spacing = 16, MinWidth = 440, MaxWidth = 560 }; panel.Children.Add(label); panel.Children.Add(list);
-        var dialog = new ContentDialog { Title = "检测已安装游戏", Content = panel, PrimaryButtonText = "添加所选", CloseButtonText = "取消", IsPrimaryButtonEnabled = false };
-        list.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = list.SelectedItems.Count > 0;
-        Task? work = null;
-        dialog.Opened += (_, _) => { work = Detect(); };
-        async Task Detect()
-        {
-            try { var tasks = await Task.Run(() => Recommendations.Detect(cancellation.Token)); if (cancellation.IsCancellationRequested) return; list.ItemsSource = tasks.Where(t => !session.Store.Tasks.Any(old => string.Equals(System.IO.Path.GetFullPath(old.Path), t.Path, StringComparison.OrdinalIgnoreCase))).ToList(); label.Text = list.Items.Count == 0 ? "没有找到可添加的游戏。可使用添加任务手动选择路径。" : "选择要添加的游戏。默认每日 04:00 重置，可在任务库中修改。"; dialog.IsPrimaryButtonEnabled = list.SelectedItems.Count > 0; }
-            catch (OperationCanceledException) { } catch (Exception ex) { label.Text = ex.Message; }
-        }
-        dialog.Closing += async (_, args) => { cancellation.Cancel(); if (work is not null) { var deferral = args.GetDeferral(); await work; deferral.Complete(); } };
-        if (await dialogs.Show(dialog) == ContentDialogResult.Primary && list.SelectedItems.Count > 0) session.SaveTasks(session.Store.Tasks.Concat(list.SelectedItems.Cast<LaunchTask>()));
-    });
     private async void SettingsChanged(object sender, RoutedEventArgs e)
     {
         if (!ready) return;
         await Guard(() =>
         {
-            var old = session.Store.Settings; var next = old.Clone(); next.AutoClose = AutoClose.IsOn; next.Tray = Tray.IsOn; next.CloseToTray = next.Tray && CloseToTray.IsOn;
+            var old = session.Store.Settings; var next = old.Clone(); next.AutoClose = (AutoClose.SelectedIndex == 1); next.Tray = (Tray.SelectedIndex == 1); next.CloseToTray = next.Tray && (CloseToTray.SelectedIndex == 1);
             try { desktop.SetTray(next.Tray); session.Store.SaveSettings(next); }
             catch { desktop.SetTray(old.Tray); throw; }
-            finally { ready = false; AutoClose.IsOn = session.Store.Settings.AutoClose; Tray.IsOn = session.Store.Settings.Tray; CloseToTray.IsOn = session.Store.Settings.CloseToTray; CloseToTray.IsEnabled = Tray.IsOn; ready = true; }
+            finally { ready = false; AutoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0; Tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0; CloseToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0; CloseToTray.IsEnabled = (Tray.SelectedIndex == 1); ready = true; }
             return Task.CompletedTask;
         });
     }
-    private async void LoginChanged(object sender, RoutedEventArgs e) { if (ready) await Guard(() => { try { desktop.SetLogin(Login.IsOn); } finally { ready = false; Login.IsOn = desktop.LoginEnabled; ready = true; } return Task.CompletedTask; }); }
+    private async void LoginChanged(object sender, RoutedEventArgs e) { if (ready) await Guard(() => { try { desktop.SetLogin((Login.SelectedIndex == 1)); } finally { ready = false; Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; ready = true; } return Task.CompletedTask; }); }
     private async void OpenData(object sender, RoutedEventArgs e) => await Guard(() => { DesktopHost.OpenFolder(session.Store.Root); return Task.CompletedTask; });
     private async void IconLoaded(object sender, RoutedEventArgs e)
     {

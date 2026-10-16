@@ -7,13 +7,12 @@
    <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,140,0" VerticalAlignment="Center">
     <Image Source="ms-appx:///Assets/App.png" Width="24" Height="24"/>
     <TextBlock Text="星间驿站" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    <TextBlock Text="Alpha 1.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
+    <TextBlock Text="Alpha 1.2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
    </StackPanel>
   </Grid>
   <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="208"
    IsBackButtonVisible="Collapsed" IsSettingsVisible="False" SelectionChanged="Navigate">
    <NavigationView.MenuItems>
-    <NavigationViewItemHeader Content="我的工具"/>
     <NavigationViewItem Content="启动管理" Tag="launch"><NavigationViewItem.Icon><FontIcon Glyph="&#xE768;"/></NavigationViewItem.Icon></NavigationViewItem>
    </NavigationView.MenuItems>
    <NavigationView.FooterMenuItems>
