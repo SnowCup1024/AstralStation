@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.0", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Root.ActualThemeChanged += (_, _) => Caption();
         Caption();
         Navigation.SelectedItem = Navigation.MenuItems[1];
@@ -94,7 +94,7 @@ public sealed partial class MainWindow : Window
         var panel = Intro("设置", "外观", "选择适合自己的界面主题。");
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
-        panel.Children.Add(theme);
+        ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);
         return panel;
     }
     private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) closeDeadline = Scheduler.Seconds + 15; desktop.Restore(); }

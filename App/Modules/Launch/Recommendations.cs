@@ -8,13 +8,12 @@ public sealed record GamePreset(string Name, string Executable, string[] Folders
 public static class Recommendations
 {
     public static readonly GamePreset[] Catalog = [
-        new("原神 · 国服", "YuanShen.exe", ["Genshin Impact Game", "Genshin Impact", "原神", "原神游戏"]),
+        new("原神", "YuanShen.exe", ["Genshin Impact Game", "Genshin Impact", "原神", "原神游戏"]),
         new("原神 · 国际服", "GenshinImpact.exe", ["Genshin Impact Game", "Genshin Impact"]),
         new("崩坏：星穹铁道", "StarRail.exe", ["Star Rail Games", "Honkai Star Rail Game", "Honkai Star Rail", "StarRail", "崩坏：星穹铁道", "崩坏 星穹铁道", "星穹铁道"]),
         new("绝区零", "ZenlessZoneZero.exe", ["ZenlessZoneZero Game", "ZenlessZoneZero", "Zenless Zone Zero", "绝区零"]),
         new("崩坏3", "BH3.exe", ["Honkai Impact 3rd Games", "Honkai Impact 3rd", "Honkai Impact 3", "BH3", "崩坏3"]),
-        new("明日方舟", "Arknights.exe", ["Arknights", "Arknights Game", "Arknights_CN", "Arknights_EN", "明日方舟"]),
-        new("明日方舟：终末地", "Endfield.exe", ["Endfield Game", "Endfield", "Arknights Endfield", "明日方舟：终末地", "明日方舟终末地"])
+        new("明日方舟", "Arknights.exe", ["Arknights", "Arknights Game", "Arknights_CN", "Arknights_EN", "明日方舟"])
     ];
     private static bool Related(string value) => new[] { "原神", "genshin", "hoyoplay", "mihoyo", "米哈游", "honkai", "starrail", "star rail", "星穹铁道", "zenless", "绝区零", "崩坏", "bh3", "arknights", "明日方舟", "endfield", "终末地", "hypergryph", "gryphlink", "鹰角", "yostar" }.Any(w => value.Contains(w, StringComparison.OrdinalIgnoreCase));
     public static List<LaunchTask> Detect(CancellationToken token)

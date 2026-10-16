@@ -22,8 +22,17 @@ public static class TaskEditor
         var browse = new Button { Content = "选择文件" }; var discover = new Button { Content = "启动并识别进程" }; var cancelDiscovery = new Button { Content = "取消识别", IsEnabled = false };
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; actions.Children.Add(browse); actions.Children.Add(discover); actions.Children.Add(cancelDiscovery);
         var panel = new StackPanel { Spacing = 12, MinWidth = 440, MaxWidth = 560 };
-        if (!options) foreach (var element in new UIElement[] { name, path, actions, processes, reset }) panel.Children.Add(element);
-        foreach (var element in new UIElement[] { enabled, args, directory, delay, timeout, status }) panel.Children.Add(element);
+        void Group(string title, params UIElement[] fields)
+        {
+            var body = new StackPanel { Spacing = 12 };
+            body.Children.Add(new TextBlock { Text = title, Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
+            foreach (var field in fields) body.Children.Add(field);
+            panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = body });
+        }
+        if (!options) { Group("任务信息", name, path, actions); Group("完成判定", processes, reset); }
+        Group("启动方式", enabled, args, directory);
+        Group("等待与检测", delay, timeout);
+        panel.Children.Add(status);
         var dialog = new ContentDialog { Title = options ? "启动选项" : "编辑任务", Content = new ScrollViewer { Content = panel, MaxHeight = 540 }, PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = ContentDialogButton.None };
         CancellationTokenSource? cancellation = null; Task? discovery = null; bool accepted = false;
         browse.Click += async (_, _) => { try { string? selected = await dialogs.Pick(".exe", ".lnk", ".bat", ".cmd", ".ps1"); if (selected is null) return; path.Text = selected; if (string.IsNullOrWhiteSpace(name.Text)) name.Text = System.IO.Path.GetFileNameWithoutExtension(selected); if (selected.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) processes.Text = System.IO.Path.GetFileNameWithoutExtension(selected); } catch (Exception ex) { status.Text = ex.Message; } };

@@ -58,6 +58,13 @@ public sealed partial class LaunchPage : UserControl
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
         ActivityText.Text = string.Join("\n", session.Store.Activities.Where(a => a.Time >= DateTime.Now.AddDays(-1)).Select(a => a.ToString()));
         RunButton.IsEnabled = RetryButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
+        QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
+        LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
+        if (LibraryList.SelectedItem is LaunchTask selectedTask)
+        {
+            ToggleTaskIcon.Glyph = selectedTask.Enabled ? "\uE769" : "\uE768";
+            ToolTipService.SetToolTip(ToggleTaskButton, selectedTask.Enabled ? "停用自动启动" : "启用自动启动");
+        }
         if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
     }
     private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
@@ -118,6 +125,7 @@ public sealed partial class LaunchPage : UserControl
     private void Pause(object sender, RoutedEventArgs e) => session.TogglePause();
     private async void RunSelected(object sender, RoutedEventArgs e) => await SelectedAction("run");
     private async void RetrySelected(object sender, RoutedEventArgs e) => await SelectedAction("retry");
+    private async void MarkSelected(object sender, RoutedEventArgs e) => await SelectedAction("mark");
     private async void EditSelected(object sender, RoutedEventArgs e) => await SelectedAction("edit");
     private async void OptionsSelected(object sender, RoutedEventArgs e) => await SelectedAction("options");
     private async void DuplicateSelected(object sender, RoutedEventArgs e) => await SelectedAction("duplicate");
@@ -167,14 +175,22 @@ public sealed partial class LaunchPage : UserControl
     }
     private async void DetectGames(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
-        using var cancellation = new CancellationTokenSource(); var label = new TextBlock { Text = "正在检测常用目录、注册表和快捷方式…", TextWrapping = TextWrapping.Wrap }; var list = new ListView { SelectionMode = ListViewSelectionMode.Multiple, DisplayMemberPath = "Name", MaxHeight = 350 };
-        var panel = new StackPanel { Spacing = 12, MinWidth = 420 }; panel.Children.Add(label); panel.Children.Add(list);
+        using var cancellation = new CancellationTokenSource(); var label = new TextBlock { Text = "正在检测常用目录、注册表和快捷方式…", TextWrapping = TextWrapping.Wrap }; var list = new ListView { SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 350, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        list.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
+            <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+              <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4">
+                <StackPanel Spacing="6"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding Path}" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              </Border>
+            </DataTemplate>
+            """);
+        var panel = new StackPanel { Spacing = 16, MinWidth = 440, MaxWidth = 560 }; panel.Children.Add(label); panel.Children.Add(list);
         var dialog = new ContentDialog { Title = "检测已安装游戏", Content = panel, PrimaryButtonText = "添加所选", CloseButtonText = "取消", IsPrimaryButtonEnabled = false };
+        list.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = list.SelectedItems.Count > 0;
         Task? work = null;
         dialog.Opened += (_, _) => { work = Detect(); };
         async Task Detect()
         {
-            try { var tasks = await Task.Run(() => Recommendations.Detect(cancellation.Token)); if (cancellation.IsCancellationRequested) return; list.ItemsSource = tasks.Where(t => !session.Store.Tasks.Any(old => string.Equals(System.IO.Path.GetFullPath(old.Path), t.Path, StringComparison.OrdinalIgnoreCase))).ToList(); label.Text = list.Items.Count == 0 ? "没有找到可添加的游戏。可使用添加任务手动选择路径。" : "选择要添加的游戏。默认每日 04:00 重置，可在任务库中修改。"; dialog.IsPrimaryButtonEnabled = list.Items.Count > 0; }
+            try { var tasks = await Task.Run(() => Recommendations.Detect(cancellation.Token)); if (cancellation.IsCancellationRequested) return; list.ItemsSource = tasks.Where(t => !session.Store.Tasks.Any(old => string.Equals(System.IO.Path.GetFullPath(old.Path), t.Path, StringComparison.OrdinalIgnoreCase))).ToList(); label.Text = list.Items.Count == 0 ? "没有找到可添加的游戏。可使用添加任务手动选择路径。" : "选择要添加的游戏。默认每日 04:00 重置，可在任务库中修改。"; dialog.IsPrimaryButtonEnabled = list.SelectedItems.Count > 0; }
             catch (OperationCanceledException) { } catch (Exception ex) { label.Text = ex.Message; }
         }
         dialog.Closing += async (_, args) => { cancellation.Cancel(); if (work is not null) { var deferral = args.GetDeferral(); await work; deferral.Complete(); } };
