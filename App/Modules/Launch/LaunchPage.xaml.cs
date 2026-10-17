@@ -31,7 +31,7 @@ public sealed partial class LaunchPage : UserControl
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
         session.Changed += Refresh; session.TasksChanged += Reload;
         AutoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0; Tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0; CloseToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0; CloseToTray.IsEnabled = (Tray.SelectedIndex == 1);
-        try { Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; } catch (Exception ex) { ErrorBar.Message = ex.Message; ErrorBar.IsOpen = true; }
+        try { desktop.RefreshLoginTarget(); Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; } catch (Exception ex) { ErrorBar.Message = ex.Message; ErrorBar.IsOpen = true; }
         DataPath.Text = session.Store.Root; ready = true; Reload();
     }
     private void Reload()

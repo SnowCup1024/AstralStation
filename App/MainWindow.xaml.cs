@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.5.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.6", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Root.ActualThemeChanged += (_, _) => Caption();
         Caption();
         Navigation.SelectedItem = Navigation.MenuItems[0];
@@ -52,6 +52,12 @@ public sealed partial class MainWindow : Window
         desktop.UserRestored += () => { foreach (var request in running.Values) request.Attempted = true; };
         desktop.PauseRequested += session.TogglePause;
         desktop.ExitRequested += RequestExit;
+        desktop.UpgradeRequested += () =>
+        {
+            if (session.Interacting || session.Scheduler.Launching || session.Store.Error is not null) { Restore(); return; }
+            try { session.Scheduler.SaveHandoff(); RequestExit(); }
+            catch (Exception ex) { session.Store.Fail("版本交接失败：" + ex.Message); Restore(); }
+        };
         desktop.MenuActive += active => { if (active) trayScope = session.Interaction(); else { trayScope?.Dispose(); trayScope = null; } };
         AppWindow.Closing += (_, args) =>
         {

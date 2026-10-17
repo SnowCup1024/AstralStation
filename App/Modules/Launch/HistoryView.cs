@@ -12,7 +12,7 @@ public sealed class HistoryView : Grid
     private readonly LaunchSession session;
     private readonly Dialogs dialogs;
     private readonly Grid content = new() { ColumnSpacing = 16, RowSpacing = 16 };
-    private readonly Grid calendar = new() { ColumnSpacing = 4, RowSpacing = 4 };
+    private readonly Grid calendar = new() { ColumnSpacing = 1, RowSpacing = 1 };
     private readonly TextBlock monthTitle = new() { FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button previous = new() { Content = new FontIcon { Glyph = "\uE76B", FontSize = 14 }, Padding = new(10) };
     private readonly Button next = new() { Content = new FontIcon { Glyph = "\uE76C", FontSize = 14 }, Padding = new(10) };
@@ -92,7 +92,7 @@ public sealed class HistoryView : Grid
         {
             string key = month.AddDays(day - 1).ToString("yyyy-MM-dd");
             bool hasRecord = available.Contains(key);
-            var button = new Button { Content = day.ToString(), Padding = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, IsEnabled = hasRecord, CornerRadius = new(6), BorderThickness = new(hasRecord ? 1.5 : 0) };
+            var button = new Button { Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord, CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
             button.Background = new SolidColorBrush(key == selected ? Windows.UI.Color.FromArgb(255, 62, 101, 185) : Microsoft.UI.Colors.Transparent);
             if (hasRecord) button.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 79, 117, 197));
             if (key == selected) button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
@@ -132,12 +132,12 @@ public sealed class HistoryView : Grid
         {
             foreach (var record in session.Store.Records(selected))
             {
-                var panel = new StackPanel { Spacing = 4 };
+                var panel = new StackPanel { Spacing = 1 };
                 panel.VerticalAlignment = VerticalAlignment.Center;
                 panel.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
                 panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
                 var row = new Grid { ColumnSpacing = 12 };
-                row.ColumnDefinitions.Add(new() { Width = new(60) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new() { Width = new(52) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
                 var icon = new GameIcon { Path = record.Path };
                 row.Children.Add(icon); row.Children.Add(panel); SetColumn(panel, 1);
                 var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = row, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);

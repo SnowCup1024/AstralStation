@@ -23,6 +23,38 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
     private bool delay, paused;
     private double pausedAt;
     private long serial;
+    public sealed record TransferRun(LaunchTask Task, double Remaining, bool Running, bool Recorded, DateTime? LaunchedAt, string ClearedCycle, string RecordId, string RecordDate);
+    public sealed record Transfer(int Schema, bool Paused, bool Delay, TransferRun? Active, List<TransferRun> Manual, List<TransferRun> Detached, Dictionary<string, string> Attempted);
+    public void SaveHandoff()
+    {
+        TransferRun Copy(Run run) => new(run.Task, Math.Max(0, run.Deadline - (delay && ReferenceEquals(run, active) && paused ? pausedAt : Seconds)), run.Running, run.Recorded, run.LaunchedAt, run.ClearedCycle, run.RecordId, run.RecordDate);
+        var value = new Transfer(1, UserPaused, delay, active is null ? null : Copy(active), manual.Values.Select(Copy).ToList(), detached.Select(Copy).ToList(), attempted);
+        string file = store.FileAt("handoff.json");
+        File.WriteAllText(file + ".tmp", System.Text.Json.JsonSerializer.Serialize(value));
+        File.Move(file + ".tmp", file, true);
+    }
+    public void RestoreHandoff()
+    {
+        string file = store.FileAt("handoff.json");
+        if (!File.Exists(file) || store.Error is not null) return;
+        try
+        {
+            var value = System.Text.Json.JsonSerializer.Deserialize<Transfer>(File.ReadAllText(file)) ?? throw new InvalidDataException("交接记录为空。");
+            if (value.Schema != 1) throw new InvalidDataException("不支持的交接记录版本。");
+            Run Copy(TransferRun item)
+            {
+                item.Task.Validate();
+                return new(item.Task, Seconds + item.Remaining) { Running = item.Running, Recorded = item.Recorded, LaunchedAt = item.LaunchedAt, ClearedCycle = item.ClearedCycle, RecordId = item.RecordId, RecordDate = item.RecordDate, Serial = ++serial };
+            }
+            active = value.Active is null ? null : Copy(value.Active); delay = value.Delay;
+            foreach (var item in value.Manual) manual.Add(item.Task.Id, Copy(item));
+            foreach (var item in value.Detached) detached.Add(Copy(item));
+            foreach (var item in value.Attempted) attempted.Add(item.Key, item.Value);
+            SetPause(value.Paused, false);
+            File.Delete(file);
+        }
+        catch (Exception ex) { store.Fail("无法恢复版本交接，已停止调度：" + ex.Message); }
+    }
     public bool Launching { get; private set; }
     public bool UserPaused { get; private set; }
     public bool Managing { get; private set; }

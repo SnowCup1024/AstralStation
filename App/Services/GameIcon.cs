@@ -21,7 +21,7 @@ public sealed class GameIcon : Grid
 
     public GameIcon()
     {
-        Width = Height = 60;
+        Width = Height = 52;
         CornerRadius = new CornerRadius(8);
         Background = brush;
         Children.Add(fallback);

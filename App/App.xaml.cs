@@ -24,7 +24,21 @@ public partial class App : Application
         if (index >= 0 && index + 1 < arguments.Length) root = Path.GetFullPath(arguments[index + 1]);
         dataRoot = root;
         mutex = new Mutex(true, "Local\\" + DesktopHost.Identity(root), out bool first);
-        if (!first) { DesktopHost.ActivateExisting(root); mutex.Dispose(); Exit(); return; }
+        if (!first)
+        {
+            // Keep ownership on this UI thread, including when the previous process exits.
+            var deadline = Environment.TickCount64 + 15000;
+            while (!first)
+            {
+                try { first = mutex.WaitOne(0); } catch (AbandonedMutexException) { first = true; }
+                if (first) break;
+                if (!DesktopHost.RequestUpgrade(root) || Environment.TickCount64 >= deadline)
+                {
+                    DesktopHost.ActivateExisting(root); mutex.Dispose(); Exit(); return;
+                }
+                Thread.Sleep(150);
+            }
+        }
         window = new MainWindow(root, arguments.Contains("--paused"), arguments.Contains("--background"));
         window.Closed += (_, _) => { mutex.ReleaseMutex(); mutex.Dispose(); };
         window.Activate();

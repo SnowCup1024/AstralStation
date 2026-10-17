@@ -11,6 +11,7 @@ public sealed class DesktopHost : IDisposable
 {
     private const uint TrayMessage = 0x8000 + 71;
     public static readonly uint RestoreMessage = RegisterWindowMessageW("AstralStation.Restore");
+    private static readonly uint UpgradeMessage = RegisterWindowMessageW("AstralStation.Upgrade");
     private readonly uint taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
     private readonly nint window;
     private readonly SubclassProc callback;
@@ -20,6 +21,7 @@ public sealed class DesktopHost : IDisposable
     public event Action? RestoreRequested;
     public event Action? PauseRequested;
     public event Action? ExitRequested;
+    public event Action? UpgradeRequested;
     public event Action<bool>? MenuActive;
     public event Action? UserRestored;
     public bool IsHidden => !IsWindowVisible(window) || IsIconic(window);
@@ -29,6 +31,7 @@ public sealed class DesktopHost : IDisposable
         window = handle; root = dataRoot; identity = Identity(root); callback = WndProc;
         if (!SetWindowSubclass(window, callback, 71, 0)) throw new InvalidOperationException("无法注册窗口消息处理。");
         SetPropW(window, identity, 1);
+        SetPropW(window, "AstralStation.UpgradeProtocol", 1);
         data = new() { Size = (uint)Marshal.SizeOf<NotifyIcon>(), Window = window, Id = 1, Flags = 7, Callback = TrayMessage, Tip = "星间驿站 · 启动管理", Info = "", InfoTitle = "" };
         // The executable carries the icon even in single-file publishing.
         data.Icon = ExtractIconW(0, Environment.ProcessPath!, 0);
@@ -37,6 +40,48 @@ public sealed class DesktopHost : IDisposable
     {
         string identity = Identity(root);
         EnumWindows((handle, _) => { if (GetPropW(handle, identity) == 0) return true; GetWindowThreadProcessId(handle, out var pid); AllowSetForegroundWindow(pid); PostMessageW(handle, RestoreMessage, 0, 0); return false; }, 0);
+    }
+    // Return false for an equal/newer instance (including versions we cannot identify).
+    public static bool RequestUpgrade(string root)
+    {
+        bool waiting = true;
+        EnumWindows((handle, _) =>
+        {
+            if (GetPropW(handle, Identity(root)) == 0) return true;
+            GetWindowThreadProcessId(handle, out var pid);
+            AllowSetForegroundWindow(pid);
+            try
+            {
+                using var process = Process.GetProcessById((int)pid);
+                string? path = process.MainModule?.FileName;
+                if (path is not null && CompareVersions(FileVersionInfo.GetVersionInfo(Environment.ProcessPath!).ProductVersion,
+                    FileVersionInfo.GetVersionInfo(path).ProductVersion) > 0)
+                {
+                    // Earlier releases understand normal close; never terminate them forcibly.
+                    PostMessageW(handle, GetPropW(handle, "AstralStation.UpgradeProtocol") != 0 ? UpgradeMessage : 0x10, 0, 0);
+                    return false;
+                }
+            }
+            catch { }
+            PostMessageW(handle, RestoreMessage, 0, 0);
+            waiting = false;
+            return false;
+        }, 0);
+        return waiting;
+    }
+    internal static int CompareVersions(string? left, string? right)
+    {
+        static (Version Core, int Alpha)? Parse(string? value)
+        {
+            var parts = value?.Split('+')[0].Split('-', 2);
+            if (parts is null || !Version.TryParse(parts[0], out var core)) return null;
+            if (parts.Length == 1) return (core, int.MaxValue);
+            return parts[1].StartsWith("alpha.") && int.TryParse(parts[1][6..], out int alpha) ? (core, alpha) : null;
+        }
+        var a = Parse(left); var b = Parse(right);
+        if (a is null || b is null) return 0;
+        int result = a.Value.Core.CompareTo(b.Value.Core);
+        return result != 0 ? result : a.Value.Alpha.CompareTo(b.Value.Alpha);
     }
     public void SetTray(bool enabled)
     {
@@ -52,6 +97,7 @@ public sealed class DesktopHost : IDisposable
         try
         {
             if (message == RestoreMessage) { RestoreRequested?.Invoke(); return 0; }
+            if (message == UpgradeMessage) { UpgradeRequested?.Invoke(); return 0; }
             if (message == taskbarCreated && tray) { if (!Shell_NotifyIconW(0, ref data)) { tray = false; Restore(); } }
             if (message == 5) { if (wParam == 1 && tray) ShowWindow(window, 0); else if (wParam == 0) UserRestored?.Invoke(); }
             if (message == TrayMessage)
@@ -75,7 +121,15 @@ public sealed class DesktopHost : IDisposable
         return DefSubclassProc(hwnd, message, wParam, lParam);
     }
     private string StartupCommand => Quote(Environment.ProcessPath!) + " --data-dir " + Quote(root);
-    public bool LoginEnabled { get { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue(identity) as string == StartupCommand; } }
+    public bool LoginEnabled { get { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue(identity) is string command && !string.IsNullOrWhiteSpace(command); } }
+    // The registration belongs to the data directory, not to a versioned EXE path.
+    // Only retarget an existing registration; a deleted/disabled entry stays disabled.
+    public void RefreshLoginTarget()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        if (key?.GetValue(identity) is string command && !string.IsNullOrWhiteSpace(command) && command != StartupCommand)
+            key.SetValue(identity, StartupCommand);
+    }
     public void SetLogin(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");

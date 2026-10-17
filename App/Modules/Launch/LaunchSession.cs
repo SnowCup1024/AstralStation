@@ -19,7 +19,7 @@ public sealed class LaunchSession : IDisposable
     public event Action<IReadOnlyList<Scheduler.RunEvent>>? RunsChanged;
     public LaunchSession(string root, bool paused, DispatcherQueue queue)
     {
-        Store = new(root); Scheduler = new(Store, Processes); Scheduler.SetPause(paused, false);
+        Store = new(root); Scheduler = new(Store, Processes); Scheduler.RestoreHandoff(); Scheduler.SetPause(paused || Scheduler.UserPaused, false);
         timer = queue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(500); timer.Tick += Tick;
     }
     public void Start() { timer.Start(); Notify(); }
