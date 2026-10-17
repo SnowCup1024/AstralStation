@@ -50,21 +50,18 @@ public sealed partial class LaunchPage : UserControl
     private void Refresh()
     {
         if (!ready) return;
-        int total = session.Store.Tasks.Count(t => t.Enabled), done = session.Store.Tasks.Count(t => t.Enabled && session.Store.Done(t, DateTime.Now));
+        int total = session.Store.Tasks.Count, done = session.Store.Tasks.Count(t => session.Store.Done(t, DateTime.Now));
         Summary.Text = $"{done} / {total}  本周期已完成"; Progress.Value = total == 0 ? 0 : done * 100.0 / total;
         PauseButton.Content = session.Scheduler.UserPaused ? "恢复自动队列" : "暂停自动队列";
         QueueHint.Text = session.Scheduler.UserPaused ? "自动队列已暂停，已启动的任务继续监测。" : "按任务库顺序启动，等待当前程序退出后继续。";
         EmptyQueue.Visibility = total == 0 && session.Store.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
-        ActivityText.Text = string.Join("\n", session.Store.Activities.Where(a => a.Time >= DateTime.Now.AddDays(-1)).Select(a => a.ToString()));
+        var activity = string.Join("\n", session.Store.Activities.Where(a => a.Time >= DateTime.Now.AddDays(-1)).Select(a => a.ToString()));
+        if (activity.Length == 0) activity = "最近 24 小时暂无活动。";
+        if (ActivityText.Text != activity) ActivityText.Text = activity;
         RunButton.IsEnabled = RetryButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
         QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
-        if (LibraryList.SelectedItem is LaunchTask selectedTask)
-        {
-            ToggleTaskIcon.Glyph = selectedTask.Enabled ? "\uE769" : "\uE768";
-            ToolTipService.SetToolTip(ToggleTaskButton, selectedTask.Enabled ? "停用自动启动" : "启用自动启动");
-        }
         if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
     }
     private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
@@ -115,8 +112,7 @@ public sealed partial class LaunchPage : UserControl
         if (action == "clear") { session.Execute(() => session.Scheduler.Clear(task)); return; }
         var tasks = session.Store.Tasks.Select(t => t.Clone()).ToList(); int index = tasks.FindIndex(t => t.Id == id);
         if (action == "delete") tasks.RemoveAt(index);
-        else if (action == "duplicate") { var copy = task.Clone(); copy.Id = Guid.NewGuid().ToString(); copy.Name += " · 副本"; copy.Enabled = false; tasks.Insert(index + 1, copy); }
-        else if (action == "toggle") tasks[index].Enabled = !tasks[index].Enabled;
+        else if (action == "duplicate") { var copy = task.Clone(); copy.Id = Guid.NewGuid().ToString(); copy.Name += " · 副本"; tasks.Insert(index + 1, copy); }
         else if (action is "up" or "down") { int target = index + (action == "up" ? -1 : 1); if (target < 0 || target >= tasks.Count) return; (tasks[index], tasks[target]) = (tasks[target], tasks[index]); }
         session.SaveTasks(tasks);
     }
@@ -129,13 +125,11 @@ public sealed partial class LaunchPage : UserControl
     private async void EditSelected(object sender, RoutedEventArgs e) => await SelectedAction("edit");
     private async void OptionsSelected(object sender, RoutedEventArgs e) => await SelectedAction("options");
     private async void DuplicateSelected(object sender, RoutedEventArgs e) => await SelectedAction("duplicate");
-    private async void ToggleSelected(object sender, RoutedEventArgs e) => await SelectedAction("toggle");
     private async void DeleteSelected(object sender, RoutedEventArgs e) => await SelectedAction("delete");
     private async void MoveUp(object sender, RoutedEventArgs e) => await SelectedAction("up");
     private async void MoveDown(object sender, RoutedEventArgs e) => await SelectedAction("down");
     private async void DoubleRun(object sender, DoubleTappedRoutedEventArgs e) => await SelectedAction("run");
     private async void DoubleEdit(object sender, DoubleTappedRoutedEventArgs e) => await SelectedAction("edit");
-    private async void RowRun(object sender, RoutedEventArgs e) { if (sender is Button { Tag: string id }) await Guard(() => Action(id, "run")); }
     private async void ResetAll(object sender, RoutedEventArgs e) => await Guard(async () => { if (await dialogs.Confirm("重置全部进度", "清除完成状态并暂停队列，已发起的运行继续监测。")) session.Execute(session.Scheduler.Reset); });
     internal static bool Ctrl => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control) & CoreVirtualKeyStates.Down) != 0;
     internal static bool Shift => (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift) & CoreVirtualKeyStates.Down) != 0;
@@ -154,7 +148,7 @@ public sealed partial class LaunchPage : UserControl
     private void ShowMenu(FrameworkElement target, LaunchTask? task)
     {
         if (task is null) return; string id = task.Id; var menu = new MenuFlyout(); IDisposable? scope = null;
-        foreach (var (label, action) in new[] { ("启动", "run"), ("重试", "retry"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), ("启用 / 停用", "toggle"), ("标记完成", "mark"), ("清除完成", "clear"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
+        foreach (var (label, action) in new[] { ("启动", "run"), ("重试", "retry"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), ("标记完成", "mark"), ("清除完成", "clear"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
         {
             var item = new MenuFlyoutItem { Text = label }; item.Click += (_, _) => { menu.Hide(); DispatcherQueue.TryEnqueue(async () => await Guard(() => Action(id, action))); }; menu.Items.Add(item);
         }
@@ -189,7 +183,7 @@ public sealed partial class LaunchPage : UserControl
     private async void OpenData(object sender, RoutedEventArgs e) => await Guard(() => { DesktopHost.OpenFolder(session.Store.Root); return Task.CompletedTask; });
     private async void IconLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Image image || image.DataContext is not LaunchTask task) return;
+        if (sender is not GameIcon image || image.DataContext is not LaunchTask task) return;
         string path = task.Path;
         if (!icons.TryGetValue(path, out var result)) icons[path] = result = LoadIcon(path);
         var icon = await result; if (image.DataContext is LaunchTask current && current.Path == path) image.Source = icon;

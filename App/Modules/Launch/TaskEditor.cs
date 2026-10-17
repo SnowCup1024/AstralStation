@@ -13,8 +13,6 @@ public static class TaskEditor
         var path = new TextBox { Header = "启动文件", Text = next.Path, PlaceholderText = "程序、快捷方式或脚本" };
         var processes = new TextBox { Header = "监测进程", Text = string.Join("; ", next.ProcessNames), PlaceholderText = "多个进程用分号分隔，不区分大小写" };
         var reset = new TimePicker { Header = "每日重置时间（本地）", ClockIdentifier = "24HourClock", Time = TimeSpan.FromSeconds(next.ResetSeconds) };
-        var enabled = new ComboBox { Header = "参加自动队列", Width = 200 };
-        enabled.Items.Add("仅手动启动"); enabled.Items.Add("已启用"); enabled.SelectedIndex = next.Enabled ? 1 : 0;
         var args = new TextBox { Header = "启动参数", Text = next.Arguments, MaxLength = 16000 };
         var directory = new TextBox { Header = "工作目录", Text = next.WorkingDirectory, PlaceholderText = "留空使用启动文件所在目录" };
         var delay = new NumberBox { Header = "启动前等待（秒，0–3600）", Value = next.DelaySeconds, Minimum = 0, Maximum = 3600, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact };
@@ -31,7 +29,7 @@ public static class TaskEditor
             panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = body });
         }
         if (!options) { Group("任务信息", name, path, actions); Group("完成判定", processes, reset); }
-        Group("启动方式", enabled, args, directory);
+        Group("启动方式", args, directory);
         Group("等待与检测", delay, timeout);
         panel.Children.Add(status);
         var form = new ScrollViewer { Content = panel, MaxHeight = 540 };
@@ -105,7 +103,7 @@ public static class TaskEditor
                 if (double.IsNaN(delay.Value) || double.IsNaN(timeout.Value) || delay.Value != Math.Floor(delay.Value) || timeout.Value != Math.Floor(timeout.Value)) throw new InvalidDataException("等待时间必须为整数。");
                 next.Name = string.IsNullOrWhiteSpace(name.Text) ? System.IO.Path.GetFileNameWithoutExtension(path.Text) : name.Text;
                 next.Path = path.Text; next.ProcessNames = processes.Text.Split([';', '；'], StringSplitOptions.RemoveEmptyEntries).ToList(); next.ResetSeconds = (int)reset.Time.TotalSeconds;
-                next.Enabled = enabled.SelectedIndex == 1; next.Arguments = args.Text; next.WorkingDirectory = directory.Text; next.DelaySeconds = (int)delay.Value; next.TimeoutSeconds = (int)timeout.Value; next.Validate();
+                next.Arguments = args.Text; next.WorkingDirectory = directory.Text; next.DelaySeconds = (int)delay.Value; next.TimeoutSeconds = (int)timeout.Value; next.Validate();
                 if (next.ProcessNames.Count == 0) throw new InvalidDataException("请填写至少一个监测进程。");
                 if (!File.Exists(next.Path)) throw new FileNotFoundException("启动文件不存在。");
                 if (next.WorkingDirectory.Length > 0 && !Directory.Exists(next.WorkingDirectory)) throw new DirectoryNotFoundException("工作目录不存在。");

@@ -11,17 +11,19 @@ public sealed class LaunchTask : INotifyPropertyChanged
     public string Path { get; set; } = "";
     public List<string> ProcessNames { get; set; } = [];
     public int ResetSeconds { get; set; } = 14400;
-    public bool Enabled { get; set; } = true;
     public string Arguments { get; set; } = "";
     public string WorkingDirectory { get; set; } = "";
     public int DelaySeconds { get; set; } = 30;
     public int TimeoutSeconds { get; set; } = 15;
     private string status = "";
     [JsonIgnore] public string Status { get => status; set { if (status == value) return; status = value; PropertyChanged?.Invoke(this, new(nameof(Status))); } }
-    [JsonIgnore] public string Detail => $"{(Enabled ? "自动" : "仅手动")} · {TimeSpan.FromSeconds(ResetSeconds):hh\\:mm} 重置 · 等待 {DelaySeconds} 秒";
+    private string completion = "";
+    [JsonIgnore] public string Completion { get => completion; set { if (completion == value) return; completion = value; PropertyChanged?.Invoke(this, new(nameof(Completion))); } }
+    [JsonIgnore] public string ResetLabel => $"{TimeSpan.FromSeconds(ResetSeconds):hh\\:mm}";
+    [JsonIgnore] public string Detail => $"{ResetLabel}重置  启动前等待 {DelaySeconds} 秒";
     public event PropertyChangedEventHandler? PropertyChanged;
     public override string ToString() => Name;
-    public LaunchTask Clone() => new() { Id = Id, Name = Name, Path = Path, ProcessNames = [.. ProcessNames], ResetSeconds = ResetSeconds, Enabled = Enabled, Arguments = Arguments, WorkingDirectory = WorkingDirectory, DelaySeconds = DelaySeconds, TimeoutSeconds = TimeoutSeconds };
+    public LaunchTask Clone() => new() { Id = Id, Name = Name, Path = Path, ProcessNames = [.. ProcessNames], ResetSeconds = ResetSeconds, Arguments = Arguments, WorkingDirectory = WorkingDirectory, DelaySeconds = DelaySeconds, TimeoutSeconds = TimeoutSeconds };
     public static string Normalize(string name) => name.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name.Trim()[..^4] : name.Trim();
     public string Cycle(DateTime time) => Cycle(time, ResetSeconds);
     public static string Cycle(DateTime time, int reset) => (time.TimeOfDay.TotalSeconds < reset ? time.Date.AddDays(-1) : time.Date).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -53,7 +55,7 @@ public sealed class LaunchRecord
     public string EndTime { get; set; } = "";
     public int? ResetSeconds { get; set; }
     [JsonIgnore] public string Date { get; set; } = "";
-    [JsonIgnore] public string Summary => Format(Time) + (string.IsNullOrEmpty(EndTime) ? "" : " — " + Format(EndTime)) + (ResetSeconds is int reset ? $"\n重置时间 {TimeSpan.FromSeconds(reset):hh\\:mm}" : "");
+    [JsonIgnore] public string Summary => Format(Time) + (string.IsNullOrEmpty(EndTime) ? "" : " — " + Format(EndTime)) + (ResetSeconds is int reset ? $"（{TimeSpan.FromSeconds(reset):hh\\:mm}重置）" : "");
     [JsonIgnore] public string CopyText => $"{Name}\n{Path}\n{Date}\n{Summary}";
     private string Format(string stamp)
     {

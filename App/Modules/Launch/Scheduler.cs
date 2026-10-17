@@ -77,7 +77,7 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
         if (paused && (active is null || delay)) return;
         if (active is null)
         {
-            foreach (var task in store.Tasks.Where(t => t.Enabled && !manual.ContainsKey(t.Id)))
+            foreach (var task in store.Tasks.Where(t => !manual.ContainsKey(t.Id)))
             {
                 if (Present(task, names)) { active = new(task, Seconds); delay = false; break; }
                 if (!store.Done(task, now) && attempted.GetValueOrDefault(task.Id) != task.Cycle(now)) { active = new(task, Seconds + task.DelaySeconds); delay = true; break; }
@@ -136,14 +136,13 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
         if (active?.Task.Id == task.Id) { if (delay) active = null; else Suppress(active); }
         SetPause(true, Managing); store.Log("已清除完成并暂停队列：" + task.Name);
     }
-    public bool AllDone => !Launching && active is null && manual.Count == 0 && detached.Count == 0 && store.Error is null && store.Tasks.Any(t => t.Enabled) && store.Tasks.All(t => !t.Enabled || store.Done(t, DateTime.Now));
+    public bool AllDone => !Launching && active is null && manual.Count == 0 && detached.Count == 0 && store.Error is null && store.Tasks.Count > 0 && store.Tasks.All(t => store.Done(t, DateTime.Now));
     public string Status(LaunchTask task)
     {
         bool done = store.Done(task, DateTime.Now); var run = manual.GetValueOrDefault(task.Id) ?? (active?.Task.Id == task.Id && !delay ? active : null);
-        if (run is not null) return run.Running ? (done ? "运行中 · 已完成" : "运行中 · 未完成") : "等待进程";
-        if (!task.Enabled) return "自动启动已停用";
+        if (run is not null) return run.Running ? "运行中" : "等待进程";
         if (done) return "本周期已完成";
-        if (active?.Task.Id == task.Id && delay) return paused ? "等待恢复" : $"{Math.Max(0, Math.Ceiling(active.Deadline - Seconds))} 秒后启动";
+        if (active?.Task.Id == task.Id && delay) return paused ? $"已暂停 · 剩余 {Math.Max(0, Math.Ceiling(active.Deadline - pausedAt))} 秒" : $"{Math.Max(0, Math.Ceiling(active.Deadline - Seconds))} 秒后启动";
         return attempted.GetValueOrDefault(task.Id) == task.Cycle(DateTime.Now) ? "本周期已跳过 · 可重试" : "尚未启动";
     }
 }

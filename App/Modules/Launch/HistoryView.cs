@@ -12,27 +12,20 @@ public sealed class HistoryView : Grid
     private readonly LaunchSession session;
     private readonly Dialogs dialogs;
     private readonly Grid content = new() { ColumnSpacing = 16, RowSpacing = 16 };
-    private readonly CalendarView calendar = new()
-    {
-        SelectionMode = CalendarViewSelectionMode.Single,
-        FirstDayOfWeek = Windows.Globalization.DayOfWeek.Monday,
-        IsOutOfScopeEnabled = false,
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        VerticalAlignment = VerticalAlignment.Top,
-        Height = 320,
-        Language = "zh-CN"
-    };
+    private readonly Grid calendar = new() { ColumnSpacing = 4, RowSpacing = 4 };
+    private readonly TextBlock monthTitle = new() { FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Button previous = new() { Content = new FontIcon { Glyph = "\uE76B", FontSize = 14 }, Padding = new(10) };
+    private readonly Button next = new() { Content = new FontIcon { Glyph = "\uE76C", FontSize = 14 }, Padding = new(10) };
+    private DateTime month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private readonly TextBlock dateTitle = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock empty = new() { Text = "选择有标记的日期，查看当天的运行记录。", TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 260 };
     private readonly TextBlock notice = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly ListView records = new() { SelectionMode = ListViewSelectionMode.Single, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-    private readonly HashSet<CalendarViewDayItem> realized = [];
-    private readonly Dictionary<string, int> counts = [];
     private List<string> available = [];
     private string? selected;
     private int revision = -1;
     private DateTime lastDay;
-    private bool interacting, updating;
+    private bool interacting;
     public HistoryView(LaunchSession session, Dialogs dialogs)
     {
         this.session = session; this.dialogs = dialogs;
@@ -44,19 +37,17 @@ public sealed class HistoryView : Grid
         content.RowDefinitions.Add(new() { Height = GridLength.Auto });
         content.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         var left = new StackPanel { Spacing = 14 };
-        left.Children.Add(new TextBlock { Text = "游玩日历", FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        left.Children.Add(calendar);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        var previous = new Button { Content = new FontIcon { Glyph = "\uE76B", FontSize = 14 } };
-        var next = new Button { Content = new FontIcon { Glyph = "\uE76C", FontSize = 14 } };
-        var today = new Button { Content = "回到本月" };
-        ToolTipService.SetToolTip(previous, "上一个有记录的月份"); ToolTipService.SetToolTip(next, "下一个有记录的月份");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(previous, "上一个有记录的月份");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(next, "下一个有记录的月份");
-        previous.Click += (_, _) => MoveRecordMonth(-1); next.Click += (_, _) => MoveRecordMonth(1);
-        today.Click += (_, _) => calendar.SetDisplayDate(DateTimeOffset.Now);
-        actions.Children.Add(previous); actions.Children.Add(today); actions.Children.Add(next); left.Children.Add(actions);
-        left.Children.Add(new TextBlock { Text = "日期下方的色条表示当天有运行记录。", FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        var header = new Grid { ColumnSpacing = 8 };
+        header.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        header.Children.Add(monthTitle); header.Children.Add(previous); header.Children.Add(next);
+        SetColumn(previous, 1); SetColumn(next, 2);
+        ToolTipService.SetToolTip(previous, "上一月"); ToolTipService.SetToolTip(next, "下一月");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(previous, "上一月");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(next, "下一月");
+        previous.Click += (_, _) => MoveMonth(-1); next.Click += (_, _) => MoveMonth(1);
+        left.Children.Add(header); left.Children.Add(calendar);
+        for (int i = 0; i < 7; i++) calendar.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         var leftCard = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = left, VerticalAlignment = VerticalAlignment.Top };
         content.Children.Add(leftCard);
         var detail = new Grid { RowSpacing = 14, MinHeight = 260 };
@@ -70,14 +61,6 @@ public sealed class HistoryView : Grid
             content.ColumnDefinitions[0].Width = wide ? new(332) : new(1, GridUnitType.Star);
             content.ColumnDefinitions[1].Width = wide ? new(1, GridUnitType.Star) : new(0);
             SetColumn(detailCard, wide ? 1 : 0); SetRow(detailCard, wide ? 0 : 1); SetRowSpan(detailCard, wide ? 2 : 1);
-        };
-        calendar.CalendarViewDayItemChanging += (_, args) => { if (args.InRecycleQueue) realized.Remove(args.Item); else { realized.Add(args.Item); Decorate(args.Item); } };
-        calendar.SelectedDatesChanged += (_, _) =>
-        {
-            if (updating) return;
-            selected = calendar.SelectedDates.Count > 0 ? calendar.SelectedDates[0].ToString("yyyy-MM-dd") : null;
-            if (selected is not null && !available.Contains(selected)) { updating = true; calendar.SelectedDates.Clear(); updating = false; selected = null; }
-            RenderRecords();
         };
         records.RightTapped += RecordMenu;
         records.KeyDown += async (_, e) =>
@@ -93,13 +76,30 @@ public sealed class HistoryView : Grid
             catch (Exception ex) { await dialogs.Error(ex.Message); }
         };
     }
-    private void Decorate(CalendarViewDayItem item)
+    private void RenderMonth()
     {
-        string key = item.Date.ToString("yyyy-MM-dd"); int count = counts.GetValueOrDefault(key);
-        // Disabled dates remain quiet instead of using CalendarView's blackout strike-through.
-        item.IsBlackout = false;
-        item.IsEnabled = count > 0;
-        item.SetDensityColors(Enumerable.Repeat(Windows.UI.Color.FromArgb(255, 93, 105, 180), Math.Min(count, 5)));
+        monthTitle.Text = month.ToString("yyyy年M月");
+        var earliest = available.Count > 0 ? DateTime.ParseExact(available[0][..7] + "-01", "yyyy-MM-dd", null) : new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        previous.IsEnabled = month > earliest;
+        next.IsEnabled = month < new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        calendar.Children.Clear(); calendar.RowDefinitions.Clear();
+        int offset = ((int)month.DayOfWeek + 6) % 7, days = DateTime.DaysInMonth(month.Year, month.Month);
+        int weeks = (offset + days + 6) / 7;
+        for (int row = 0; row <= weeks; row++) calendar.RowDefinitions.Add(new() { Height = new(38) });
+        string[] weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+        for (int i = 0; i < 7; i++) { var label = new TextBlock { Text = weekdays[i], HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; calendar.Children.Add(label); SetColumn(label, i); }
+        for (int day = 1; day <= days; day++)
+        {
+            string key = month.AddDays(day - 1).ToString("yyyy-MM-dd");
+            bool hasRecord = available.Contains(key);
+            var button = new Button { Content = day.ToString(), Padding = new(0), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch, IsEnabled = hasRecord, CornerRadius = new(6), BorderThickness = new(hasRecord ? 1.5 : 0) };
+            button.Background = new SolidColorBrush(key == selected ? Windows.UI.Color.FromArgb(255, 62, 101, 185) : Microsoft.UI.Colors.Transparent);
+            if (hasRecord) button.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 79, 117, 197));
+            if (key == selected) button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, key);
+            button.Click += (_, _) => { selected = key; RenderMonth(); RenderRecords(); };
+            int cell = offset + day - 1; SetRow(button, cell / 7 + 1); SetColumn(button, cell % 7); calendar.Children.Add(button);
+        }
     }
     public void RefreshIfNeeded(bool force = false)
     {
@@ -108,31 +108,18 @@ public sealed class HistoryView : Grid
         {
             var result = session.Store.HistoryDates();
             available = result.Dates.Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).ToList();
-            counts.Clear(); foreach (var date in available) counts[date] = session.Store.Records(date).Count;
-            notice.Text = result.Errors.Count == 0 ? "按启动时的每日重置周期归档，跨日退出保留在原日期。" : "部分记录无法读取：\n" + string.Join("\n", result.Errors);
-            updating = true;
-            calendar.MinDate = new DateTimeOffset(available.Count > 0 ? DateTime.ParseExact(available[0][..7] + "-01", "yyyy-MM-dd", null) : new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1));
-            calendar.MaxDate = new DateTimeOffset(new DateTime(DateTime.Today.Year, DateTime.Today.Month, DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month)));
-            if (selected is null || !available.Contains(selected)) selected = available.LastOrDefault(d => d.StartsWith(DateTime.Today.ToString("yyyy-MM")));
-            calendar.SelectedDates.Clear();
-            foreach (var item in realized) Decorate(item);
-            if (selected is not null) calendar.SelectedDates.Add(new DateTimeOffset(DateTime.ParseExact(selected, "yyyy-MM-dd", null)));
-            if (revision == -1) calendar.SetDisplayDate(DateTimeOffset.Now);
+            notice.Text = result.Errors.Count == 0 ? "按启动时的每日重置周期归档，跨日退出保留在原日期。" : "部分记录无法读取：\\n" + string.Join("\\n", result.Errors);
+            if (selected is null || !available.Contains(selected)) selected = available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
             revision = session.Store.Revision; lastDay = DateTime.Today;
-            RenderRecords();
+            RenderMonth(); RenderRecords();
         }
         catch (Exception ex) { notice.Text = ex.Message; }
-        finally { updating = false; }
     }
-    private void MoveRecordMonth(int direction)
+    private void MoveMonth(int direction)
     {
-        var baseline = selected is null ? DateTime.Today.ToString("yyyy-MM") : selected[..7];
-        var months = available.Select(d => d[..7]).Distinct().Order().ToList();
-        var target = direction < 0 ? months.LastOrDefault(m => string.CompareOrdinal(m, baseline) < 0) : months.FirstOrDefault(m => string.CompareOrdinal(m, baseline) > 0);
-        if (target is null) return;
-        selected = available.Last(d => d.StartsWith(target));
-        updating = true; calendar.SelectedDates.Clear(); calendar.SelectedDates.Add(new DateTimeOffset(DateTime.ParseExact(selected, "yyyy-MM-dd", null))); updating = false;
-        calendar.SetDisplayDate(calendar.SelectedDates[0]); RenderRecords();
+        month = month.AddMonths(direction);
+        selected = available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
+        RenderMonth(); RenderRecords();
     }
     private void RenderRecords()
     {
@@ -144,13 +131,13 @@ public sealed class HistoryView : Grid
         {
             foreach (var record in session.Store.Records(selected))
             {
-                var panel = new StackPanel { Spacing = 6, Margin = new(4, 8, 4, 8) };
+                var panel = new StackPanel { Spacing = 4 };
                 panel.VerticalAlignment = VerticalAlignment.Center;
                 panel.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12 });
+                panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
                 var row = new Grid { ColumnSpacing = 12 };
-                row.ColumnDefinitions.Add(new() { Width = new(80) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
-                var icon = new Image { Width = 80, Height = 80, VerticalAlignment = VerticalAlignment.Center };
+                row.ColumnDefinitions.Add(new() { Width = new(60) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+                var icon = new GameIcon();
                 row.Children.Add(icon); row.Children.Add(panel); SetColumn(panel, 1);
                 var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = row, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);
                 if (!string.IsNullOrEmpty(selectedId) && record.Id == selectedId) records.SelectedItem = item;
@@ -159,7 +146,7 @@ public sealed class HistoryView : Grid
         }
         catch (Exception ex) { notice.Text = ex.Message; }
     }
-    private static async Task SetIcon(Image image, string path) => image.Source = await LaunchPage.LoadIcon(path);
+    private static async Task SetIcon(GameIcon image, string path) => image.Source = await LaunchPage.LoadIcon(path);
     private void RecordMenu(object sender, RightTappedRoutedEventArgs e)
     {
         var element = e.OriginalSource as DependencyObject;

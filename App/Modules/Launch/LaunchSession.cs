@@ -37,7 +37,7 @@ public sealed class LaunchSession : IDisposable
         Store.SaveTasks(next); Scheduler.Changed(); generation++; TasksChanged?.Invoke(); Notify();
     }
     public void Execute(Action action) { if (Scheduler.Launching) throw new InvalidOperationException("正在启动程序。"); try { action(); } finally { generation++; Notify(); } }
-    public void Notify() { foreach (var task in Store.Tasks) task.Status = Scheduler.Status(task); Changed?.Invoke(); }
+    public void Notify() { foreach (var task in Store.Tasks) { task.Status = Scheduler.Status(task); task.Completion = $"今日{(Store.Done(task, DateTime.Now) ? "已" : "未")}完成（{task.ResetLabel}重置）"; } Changed?.Invoke(); }
     private async void Tick(DispatcherQueueTimer sender, object args)
     {
         if (ticking || disposed || Scheduler.Launching) return;

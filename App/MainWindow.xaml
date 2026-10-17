@@ -7,7 +7,7 @@
    <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,140,0" VerticalAlignment="Center">
     <Image Source="ms-appx:///Assets/App.png" Width="24" Height="24"/>
     <TextBlock Text="星间驿站" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    <TextBlock Text="Alpha 1.3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
+    <TextBlock Text="Alpha 1.4" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
    </StackPanel>
   </Grid>
   <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="208"
