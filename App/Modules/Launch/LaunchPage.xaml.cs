@@ -27,6 +27,7 @@ public sealed partial class LaunchPage : UserControl
     {
         this.session = session; this.dialogs = dialogs; this.desktop = desktop;
         InitializeComponent(); history = new(session, dialogs); CalendarHost.Content = history;
+        RingLabel.Foreground = RingValue.Foreground = RingTask.Foreground = Progress.ProgressBrush;
         LibraryList.ItemsSource = library;
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
         session.Changed += Refresh; session.TasksChanged += Reload;
@@ -59,11 +60,16 @@ public sealed partial class LaunchPage : UserControl
     }
     private void QueueSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        bool wide = e.NewSize.Width >= 680;
+        double width = Math.Max(1, e.NewSize.Width - 12);
+        QueueLayout.Width = width;
+        bool wide = width >= 640;
+        QueueLayout.ColumnSpacing = wide ? 20 : 0;
+        QueueLayout.RowSpacing = wide ? 0 : 16;
+        RingViewport.Width = RingViewport.Height = Math.Max(1, Math.Min(Math.Min(224, width), Math.Max(96, e.NewSize.Height - 110)));
         QueueLayout.ColumnDefinitions[0].Width = wide ? new GridLength(252) : new GridLength(1, GridUnitType.Star);
         QueueLayout.ColumnDefinitions[1].Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        QueueLayout.RowDefinitions[0].Height = wide ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
-        QueueLayout.RowDefinitions[1].Height = wide ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        QueueLayout.RowDefinitions[0].Height = GridLength.Auto;
+        QueueLayout.RowDefinitions[1].Height = wide ? new GridLength(0) : GridLength.Auto;
         Grid.SetColumn(QueueContent, wide ? 1 : 0); Grid.SetRow(QueueContent, wide ? 0 : 1);
     }
     private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
