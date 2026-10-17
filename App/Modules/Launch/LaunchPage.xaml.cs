@@ -3,11 +3,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
 using System.Collections.ObjectModel;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
-using Windows.Storage.FileProperties;
 using Windows.System;
 using Windows.UI.Core;
 
@@ -20,7 +18,6 @@ public sealed partial class LaunchPage : UserControl
     private readonly DesktopHost desktop;
     private readonly ObservableCollection<LaunchTask> library = [];
     private readonly HistoryView history;
-    private readonly Dictionary<string, Task<BitmapImage?>> icons = new(StringComparer.OrdinalIgnoreCase);
     private bool ready, commandBusy;
     private IDisposable? reorderScope;
     public bool IsQueue => Tabs.SelectedIndex == 0;
@@ -43,8 +40,6 @@ public sealed partial class LaunchPage : UserControl
         library.Clear(); foreach (var task in session.Store.Tasks) library.Add(task);
         QueueList.ItemsSource = session.Store.Tasks;
         LibraryList.SelectedItem = library.FirstOrDefault(t => t.Id == selected); QueueList.SelectedItem = session.Store.Tasks.FirstOrDefault(t => t.Id == queue);
-        var paths = session.Store.Tasks.Select(t => t.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var key in icons.Keys.Where(k => !paths.Contains(k)).ToArray()) icons.Remove(key);
         Refresh();
     }
     private void Refresh()
@@ -188,15 +183,4 @@ public sealed partial class LaunchPage : UserControl
     }
     private async void LoginChanged(object sender, RoutedEventArgs e) { if (ready) await Guard(() => { try { desktop.SetLogin((Login.SelectedIndex == 1)); } finally { ready = false; Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; ready = true; } return Task.CompletedTask; }); }
     private async void OpenData(object sender, RoutedEventArgs e) => await Guard(() => { DesktopHost.OpenFolder(session.Store.Root); return Task.CompletedTask; });
-    private async void IconLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not GameIcon image || image.DataContext is not LaunchTask task) return;
-        string path = task.Path;
-        if (!icons.TryGetValue(path, out var result)) icons[path] = result = LoadIcon(path);
-        var icon = await result; if (image.DataContext is LaunchTask current && current.Path == path) image.Source = icon;
-    }
-    internal static async Task<BitmapImage?> LoadIcon(string path)
-    {
-        try { var file = await StorageFile.GetFileFromPathAsync(System.IO.Path.GetFullPath(path)); using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 128, ThumbnailOptions.UseCurrentScale); if (thumb is null) return null; var image = new BitmapImage(); await image.SetSourceAsync(thumb); return image; } catch { return null; }
-    }
 }

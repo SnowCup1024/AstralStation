@@ -138,16 +138,14 @@ public sealed class HistoryView : Grid
                 panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
                 var row = new Grid { ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new() { Width = new(60) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
-                var icon = new GameIcon();
+                var icon = new GameIcon { Path = record.Path };
                 row.Children.Add(icon); row.Children.Add(panel); SetColumn(panel, 1);
                 var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = row, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);
                 if (!string.IsNullOrEmpty(selectedId) && record.Id == selectedId) records.SelectedItem = item;
-                _ = SetIcon(icon, record.Path);
             }
         }
         catch (Exception ex) { notice.Text = ex.Message; notice.Visibility = Visibility.Visible; }
     }
-    private static async Task SetIcon(GameIcon image, string path) => image.Source = await LaunchPage.LoadIcon(path);
     private void RecordMenu(object sender, RightTappedRoutedEventArgs e)
     {
         var element = e.OriginalSource as DependencyObject;
