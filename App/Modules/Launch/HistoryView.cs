@@ -19,7 +19,7 @@ public sealed class HistoryView : Grid
     private DateTime month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private readonly TextBlock dateTitle = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock empty = new() { Text = "选择有标记的日期，查看当天的运行记录。", TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 260 };
-    private readonly TextBlock notice = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+    private readonly TextBlock notice = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
     private readonly ListView records = new() { SelectionMode = ListViewSelectionMode.Single, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private List<string> available = [];
     private string? selected;
@@ -30,7 +30,7 @@ public sealed class HistoryView : Grid
     {
         this.session = session; this.dialogs = dialogs;
         RowDefinitions.Add(new() { Height = GridLength.Auto });
-        RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); RowSpacing = 12;
+        RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); RowSpacing = 0;
         Children.Add(notice); Children.Add(content); SetRow(content, 1);
         content.ColumnDefinitions.Add(new() { Width = new(332) });
         content.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
@@ -108,12 +108,13 @@ public sealed class HistoryView : Grid
         {
             var result = session.Store.HistoryDates();
             available = result.Dates.Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).ToList();
-            notice.Text = result.Errors.Count == 0 ? "按启动时的每日重置周期归档，跨日退出保留在原日期。" : "部分记录无法读取：\\n" + string.Join("\\n", result.Errors);
+            notice.Text = result.Errors.Count == 0 ? "" : "部分记录无法读取：\\n" + string.Join("\\n", result.Errors);
             if (selected is null || !available.Contains(selected)) selected = available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
+            notice.Visibility = result.Errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             revision = session.Store.Revision; lastDay = DateTime.Today;
             RenderMonth(); RenderRecords();
         }
-        catch (Exception ex) { notice.Text = ex.Message; }
+        catch (Exception ex) { notice.Text = ex.Message; notice.Visibility = Visibility.Visible; }
     }
     private void MoveMonth(int direction)
     {
@@ -144,7 +145,7 @@ public sealed class HistoryView : Grid
                 _ = SetIcon(icon, record.Path);
             }
         }
-        catch (Exception ex) { notice.Text = ex.Message; }
+        catch (Exception ex) { notice.Text = ex.Message; notice.Visibility = Visibility.Visible; }
     }
     private static async Task SetIcon(GameIcon image, string path) => image.Source = await LaunchPage.LoadIcon(path);
     private void RecordMenu(object sender, RightTappedRoutedEventArgs e)

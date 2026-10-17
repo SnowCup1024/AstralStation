@@ -51,18 +51,25 @@ public sealed partial class LaunchPage : UserControl
     {
         if (!ready) return;
         int total = session.Store.Tasks.Count, done = session.Store.Tasks.Count(t => session.Store.Done(t, DateTime.Now));
-        Summary.Text = $"{done} / {total}  本周期已完成"; Progress.Value = total == 0 ? 0 : done * 100.0 / total;
+        Summary.Text = $"{done} / {total}  今日已完成"; Progress.SetProgress(total == 0 ? 0 : (double)done / total);
+        var display = session.Scheduler.QueueDisplay;
+        RingLabel.Text = display.Label; RingValue.Text = display.Value; RingTask.Text = display.Name;
         PauseButton.Content = session.Scheduler.UserPaused ? "恢复自动队列" : "暂停自动队列";
-        QueueHint.Text = session.Scheduler.UserPaused ? "自动队列已暂停，已启动的任务继续监测。" : "按任务库顺序启动，等待当前程序退出后继续。";
         EmptyQueue.Visibility = total == 0 && session.Store.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
-        var activity = string.Join("\n", session.Store.Activities.Where(a => a.Time >= DateTime.Now.AddDays(-1)).Select(a => a.ToString()));
-        if (activity.Length == 0) activity = "最近 24 小时暂无活动。";
-        if (ActivityText.Text != activity) ActivityText.Text = activity;
         RunButton.IsEnabled = RetryButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
         QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
+    }
+    private void QueueSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        bool wide = e.NewSize.Width >= 680;
+        QueueLayout.ColumnDefinitions[0].Width = wide ? new GridLength(252) : new GridLength(1, GridUnitType.Star);
+        QueueLayout.ColumnDefinitions[1].Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        QueueLayout.RowDefinitions[0].Height = wide ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        QueueLayout.RowDefinitions[1].Height = wide ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(QueueContent, wide ? 1 : 0); Grid.SetRow(QueueContent, wide ? 0 : 1);
     }
     private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
     private void SelectionChanged(object sender, SelectionChangedEventArgs e) => Refresh();

@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.4", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.5", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Root.ActualThemeChanged += (_, _) => Caption();
         Caption();
         Navigation.SelectedItem = Navigation.MenuItems[0];
@@ -118,14 +118,20 @@ public sealed partial class MainWindow : Window
         if (!CanClose) { CancelCountdown(); return; }
         closeDeadline ??= Scheduler.Seconds + 15;
         int remaining = Math.Max(0, (int)Math.Ceiling(closeDeadline.Value - Scheduler.Seconds));
-        if (countdownText is not null) countdownText.Text = $"所有启用任务已完成，运行记录已保存。\n{remaining} 秒后退出星间驿站。";
+        if (countdownText is not null) countdownText.Text = $"所有任务已完成，运行记录已保存。\n{remaining} 秒后退出星间驿站。";
         if (remaining == 0) { RequestExit(); return; }
         if (!desktop.IsHidden && completionDialog is null && Root.XamlRoot is not null) ShowCountdown(remaining);
     }
     private async void ShowCountdown(int remaining)
     {
-        countdownText = new TextBlock { Text = $"所有启用任务已完成，运行记录已保存。\n{remaining} 秒后退出星间驿站。", TextWrapping = TextWrapping.Wrap };
-        var dialog = new ContentDialog { Title = "今日安排已完成", Content = countdownText, CloseButtonText = "保持打开", XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme };
+        countdownText = new TextBlock { Text = $"所有任务已完成，运行记录已保存。\n{remaining} 秒后退出星间驿站。", TextWrapping = TextWrapping.Wrap };
+        var body = new StackPanel { Spacing = 16 };
+        body.Children.Add(countdownText);
+        var keepButton = new Button { Content = "仅本次", HorizontalAlignment = HorizontalAlignment.Right };
+        ToolTipService.SetToolTip(keepButton, "仅本次保持打开");
+        body.Children.Add(keepButton);
+        var dialog = new ContentDialog { Title = "今日安排已完成", Content = body, XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme };
+        keepButton.Click += (_, _) => { keepOpen = true; closeDeadline = null; dialog.Hide(); };
         completionDialog = dialog;
         dialog.CloseButtonClick += (_, _) => { keepOpen = true; closeDeadline = null; };
         dialog.KeyDown += (_, e) => { if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Escape) { keepOpen = true; closeDeadline = null; dialog.Hide(); e.Handled = true; } };
