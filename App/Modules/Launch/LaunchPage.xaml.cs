@@ -196,6 +196,6 @@ public sealed partial class LaunchPage : UserControl
     }
     internal static async Task<BitmapImage?> LoadIcon(string path)
     {
-        try { var file = await StorageFile.GetFileFromPathAsync(System.IO.Path.GetFullPath(path)); using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 32, ThumbnailOptions.UseCurrentScale); if (thumb is null) return null; var image = new BitmapImage(); await image.SetSourceAsync(thumb); return image; } catch { return null; }
+        try { var file = await StorageFile.GetFileFromPathAsync(System.IO.Path.GetFullPath(path)); using var thumb = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 128, ThumbnailOptions.UseCurrentScale); if (thumb is null) return null; var image = new BitmapImage(); await image.SetSourceAsync(thumb); return image; } catch { return null; }
     }
 }

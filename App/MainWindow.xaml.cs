@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.3", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Root.ActualThemeChanged += (_, _) => Caption();
         Caption();
         Navigation.SelectedItem = Navigation.MenuItems[0];
@@ -85,13 +85,13 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(new TextBlock { Text = title, Style = (Style)Application.Current.Resources["PageTitleStyle"] });
         var content = new StackPanel { Spacing = 12 };
         content.Children.Add(new TextBlock { Text = subtitle, Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
-        content.Children.Add(new TextBlock { Text = body });
+        if (!string.IsNullOrEmpty(body)) content.Children.Add(new TextBlock { Text = body });
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = content });
         return panel;
     }
     private FrameworkElement Settings()
     {
-        var panel = Intro("设置", "外观", "选择适合自己的界面主题。");
+        var panel = Intro("设置", "外观", "");
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
         ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);

@@ -145,9 +145,14 @@ public sealed class HistoryView : Grid
             foreach (var record in session.Store.Records(selected))
             {
                 var panel = new StackPanel { Spacing = 6, Margin = new(4, 8, 4, 8) };
-                var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; var icon = new Image { Width = 28, Height = 28 }; heading.Children.Add(icon); heading.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }); panel.Children.Add(heading);
-                panel.Children.Add(new TextBlock { Text = record.Path, FontSize = 12, TextWrapping = TextWrapping.Wrap }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12 });
-                var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = panel, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);
+                panel.VerticalAlignment = VerticalAlignment.Center;
+                panel.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12 });
+                var row = new Grid { ColumnSpacing = 12 };
+                row.ColumnDefinitions.Add(new() { Width = new(80) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+                var icon = new Image { Width = 80, Height = 80, VerticalAlignment = VerticalAlignment.Center };
+                row.Children.Add(icon); row.Children.Add(panel); SetColumn(panel, 1);
+                var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = row, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);
                 if (!string.IsNullOrEmpty(selectedId) && record.Id == selectedId) records.SelectedItem = item;
                 _ = SetIcon(icon, record.Path);
             }
