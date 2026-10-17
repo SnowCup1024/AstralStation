@@ -65,7 +65,8 @@ public sealed partial class LaunchPage : UserControl
         bool wide = width >= 640;
         QueueLayout.ColumnSpacing = wide ? 20 : 0;
         QueueLayout.RowSpacing = wide ? 0 : 16;
-        RingViewport.Width = RingViewport.Height = Math.Max(1, Math.Min(Math.Min(224, width), Math.Max(96, e.NewSize.Height - 110)));
+        // The entire application is scaled from a fixed design; do not scale just the ring.
+        RingViewport.Width = RingViewport.Height = 224;
         QueueLayout.ColumnDefinitions[0].Width = wide ? new GridLength(252) : new GridLength(1, GridUnitType.Star);
         QueueLayout.ColumnDefinitions[1].Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         QueueLayout.RowDefinitions[0].Height = GridLength.Auto;

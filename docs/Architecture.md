@@ -10,6 +10,10 @@ Scheduler 输出运行事件，MainWindow 处理最小化、恢复和聚焦。�
 
 配置与运行快照分离。保存后按 ID 定位，改路径/进程集合将原运行转为独立监测。历史使用启动时名称、路径、时间与周期快照，退出按 ID 补写。
 
-发布入口为 Build.ps1，产物为 .build/Alpha-1.6.1/AstralStation.exe。构建不自动运行应用，不以构建成功代替实际功能验证。
+发布入口为 Build.ps1，产物为 .build/Alpha-1.7/AstralStation.exe。构建不自动运行应用，不以构建成功代替实际功能验证。
 
 用户数据不得提交。暂不添加许可证；应用壳样式及图标来自用户指定的旧项目。
+
+## Alpha 1.7 窗口与缩放
+
+WindowSizing 统一管理四档物理像素窗口、屏幕容量及跨屏调整。禁止拖拽改变尺寸与最大化。MainWindow 的 Viewbox 承载 960×540 逻辑基准，所有页面与自绘窗口按钮共同缩放。ContentDialog 通过 Dialogs.ShowInPlace 加入 Root，保持相同坐标系。WindowHeight 保存所选档位；0 表示首次按当前屏幕选择最大可用档位。

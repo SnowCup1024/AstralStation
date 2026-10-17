@@ -32,7 +32,7 @@ public static class TaskEditor
         Group("启动方式", args, directory);
         Group("等待与检测", delay, timeout);
         panel.Children.Add(status);
-        var form = new ScrollViewer { Content = panel, MaxHeight = 540 };
+        var form = new ScrollViewer { Content = panel, MaxHeight = 320 };
         var heading = new Grid { Width = 440, ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition());
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -45,7 +45,7 @@ public static class TaskEditor
         using var detectionCancellation = new CancellationTokenSource();
         Task? detectionWork = null;
         var detectionLabel = new TextBlock { Text = "正在检测常用目录、注册表和快捷方式…", TextWrapping = TextWrapping.Wrap };
-        var detectedList = new ListView { SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 400, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        var detectedList = new ListView { SelectionMode = ListViewSelectionMode.Multiple, MaxHeight = 240, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         detectedList.ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("""
             <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
               <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4">

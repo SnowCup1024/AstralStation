@@ -15,6 +15,9 @@ public sealed partial class MainWindow : Window
     private readonly LaunchSession session;
     private readonly DesktopHost desktop;
     private readonly Dialogs dialogs;
+    private readonly WindowSizing sizing;
+    private ComboBox? windowSize;
+    private bool updatingWindowSize;
     private LaunchPage? launchPage;
     private string activeRoute = "launch";
     private bool forceExit, closed, keepOpen, restoreAfterRuns;
@@ -27,24 +30,18 @@ public sealed partial class MainWindow : Window
     public MainWindow(string dataRoot, bool paused, bool background)
     {
         InitializeComponent();
-        ExtendsContentIntoTitleBar = true;
-        SetTitleBar(TitleBar);
         SystemBackdrop = new MicaBackdrop();
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        var work = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
-        double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        AppWindow.Resize(new SizeInt32(Math.Min((int)(1120 * scale), (int)(work.Width * .9)), Math.Min((int)(760 * scale), (int)(work.Height * .9))));
-        AppWindow.Move(new PointInt32(work.X + (work.Width - AppWindow.Size.Width) / 2, work.Y + (work.Height - AppWindow.Size.Height) / 2));
         session = new(dataRoot, paused, DispatcherQueue);
+        sizing = new(AppWindow, DispatcherQueue, session.Store.Settings.WindowHeight);
+        sizing.Changed += RefreshWindowSize;
         desktop = new(WinRT.Interop.WindowNative.GetWindowHandle(this), dataRoot);
         dialogs = new(this, Root, session);
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.6.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
-        Root.ActualThemeChanged += (_, _) => Caption();
-        Caption();
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 1.7", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -65,21 +62,31 @@ public sealed partial class MainWindow : Window
             if (session.Interacting || session.Scheduler.Launching) { args.Cancel = true; session.DiscoveryCancellation?.Cancel(); return; }
             if (session.Store.Settings.Tray && session.Store.Settings.CloseToTray) { args.Cancel = true; desktop.Minimize(); }
         };
-        Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
+        Closed += (_, _) => { closed = true; completionDialog?.Hide(); sizing.Dispose(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += (_, _) => { session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize(); };
     }
-    private void Caption()
+    private void DragTitleBar(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs args)
     {
-        var title = AppWindow.TitleBar;
-        title.ButtonForegroundColor = Root.ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
-        title.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
-        title.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        if (!args.GetCurrentPoint(TitleBar).Properties.IsLeftButtonPressed) return;
+        ReleaseCapture();
+        SendMessageW(WinRT.Interop.WindowNative.GetWindowHandle(this), 0xA1, 2, 0);
+        args.Handled = true;
     }
-    private void NavigationDisplayModeChanged(NavigationView sender, NavigationViewDisplayModeChangedEventArgs args)
+    private void MinimizeWindow(object sender, RoutedEventArgs args) => desktop.Minimize();
+    private void CloseWindow(object sender, RoutedEventArgs args) => Close();
+    private void RefreshWindowSize()
     {
-        if (PageHost is not null) PageHost.Margin = new Thickness(0, args.DisplayMode == NavigationViewDisplayMode.Minimal ? 40 : 0, 0, 0);
+        if (windowSize is null) return;
+        updatingWindowSize = true;
+        try
+        {
+            foreach (ComboBoxItem item in windowSize.Items) item.IsEnabled = sizing.Available((int)item.Tag);
+            windowSize.SelectedIndex = Array.IndexOf(WindowSizing.Heights, sizing.Height);
+        }
+        finally { updatingWindowSize = false; }
     }
-    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ReleaseCapture();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nuint wParam, nint lParam);
     private void Navigate(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is not NavigationViewItem { Tag: string key } || !routes.TryGetValue(key, out var factory)) return;
@@ -105,7 +112,22 @@ public sealed partial class MainWindow : Window
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
         ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);
-        return panel;
+        windowSize = new ComboBox { Header = "窗口尺寸", MinWidth = 300 };
+        string[] labels = ["720P · 960 × 540", "1080P · 1440 × 810", "1440P · 1920 × 1080", "2160P · 2880 × 1620"];
+        for (int i = 0; i < labels.Length; i++) windowSize.Items.Add(new ComboBoxItem { Content = labels[i], Tag = WindowSizing.Heights[i] });
+        RefreshWindowSize();
+        windowSize.SelectionChanged += async (_, _) =>
+        {
+            if (updatingWindowSize || windowSize.SelectedItem is not ComboBoxItem { Tag: int height } || !sizing.Available(height)) return;
+            try
+            {
+                var next = session.Store.Settings.Clone(); next.WindowHeight = height;
+                session.Store.SaveSettings(next); sizing.Select(height);
+            }
+            catch (Exception ex) { RefreshWindowSize(); await dialogs.Error(ex.Message); }
+        };
+        ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(windowSize);
+        return new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
     private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) closeDeadline = Scheduler.Seconds + 15; desktop.Restore(); }
     private void RequestExit() { if (session.Interacting || session.Scheduler.Launching) { Restore(); return; } forceExit = true; completionDialog?.Hide(); Close(); }
@@ -145,7 +167,7 @@ public sealed partial class MainWindow : Window
         completionDialog = dialog;
         dialog.CloseButtonClick += (_, _) => { keepOpen = true; closeDeadline = null; };
         dialog.KeyDown += (_, e) => { if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Escape) { keepOpen = true; closeDeadline = null; dialog.Hide(); e.Handled = true; } };
-        try { await dialog.ShowAsync(); if (closeDeadline is not null && !closed) { keepOpen = true; closeDeadline = null; } }
+        try { await Dialogs.ShowInPlace(dialog, Root); if (closeDeadline is not null && !closed) { keepOpen = true; closeDeadline = null; } }
         finally { completionDialog = null; countdownText = null; }
     }
 }
