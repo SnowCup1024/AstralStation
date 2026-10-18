@@ -9,7 +9,7 @@ using Windows.Storage;
 using Windows.System;
 using Windows.UI.Core;
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 public sealed partial class LaunchPage : UserControl
 {

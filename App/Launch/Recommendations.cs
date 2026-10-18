@@ -2,15 +2,23 @@ using Microsoft.Win32;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 // Only the user's Alpha 2.0 list. No emulator, Steam, installer or generic launcher is a game process.
-public static class AdditionalGames
+public static class Recommendations
 {
-    private sealed record Profile(string Name, string[] Aliases);
+    private sealed record Profile(string Name, string[] Aliases, string? Executable = null);
     private sealed record Shortcut(Profile Game, string Path, string Target);
     private static readonly Profile[] Profiles = [
+        new("原神", ["Genshin Impact Game", "Genshin Impact", "原神", "原神游戏"], "YuanShen.exe"),
+        new("原神 · 国际服", ["Genshin Impact Game", "Genshin Impact"], "GenshinImpact.exe"),
+        new("崩坏：星穹铁道", ["Star Rail Games", "Honkai Star Rail Game", "Honkai Star Rail", "StarRail", "崩坏：星穹铁道", "崩坏 星穹铁道", "星穹铁道"], "StarRail.exe"),
+        new("绝区零", ["ZenlessZoneZero Game", "ZenlessZoneZero", "Zenless Zone Zero", "绝区零"], "ZenlessZoneZero.exe"),
+        new("崩坏3", ["Honkai Impact 3rd Games", "Honkai Impact 3rd", "Honkai Impact 3", "BH3", "崩坏3"], "BH3.exe"),
+        new("明日方舟", ["Arknights", "Arknights Game", "Arknights_CN", "Arknights_EN", "明日方舟"], "Arknights.exe"),
+
         new("重返未来：1999", ["重返未来1999", "Reverse1999", "Reverse 1999"]),
         new("异环", ["异环", "Neverness to Everness", "NTE"]),
         new("无限暖暖", ["无限暖暖", "Infinity Nikki", "InfinityNikki"]),
@@ -26,7 +34,7 @@ public static class AdditionalGames
     {
         if (new[] { "百闻牌", "决战平安京", "阴阳师妖怪屋", "壁纸", "Party Dash", "热血喧闹", "热血ハチャメチャ" }.Any(x => value.Contains(x, StringComparison.OrdinalIgnoreCase))) return false;
         string normalized = Normalize(value);
-        return game.Aliases.Any(alias => { string key = Normalize(alias); return key.Length <= 3 ? normalized == key : normalized.Contains(key); });
+        return game.Aliases.Any(alias => { string key = Normalize(alias); return key.Length <= 3 && key.All(char.IsAscii) ? normalized == key : normalized.Contains(key); });
     }
     private static bool Excluded(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         .Any(part => new[] { "steam", "steamapps", "BlueStacks", "MuMu", "LDPlayer", "Nox", "Engine", "Cache", "Logs", "Content", "Paks", "AssetBundles" }.Contains(part, StringComparer.OrdinalIgnoreCase));
@@ -35,6 +43,17 @@ public static class AdditionalGames
 
     public static List<LaunchTask> Detect(CancellationToken token)
     {
+        var hints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void AddHint(string? path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                path = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+                if (Path.IsPathFullyQualified(path) && !Excluded(path) && Directory.Exists(path)) hints.Add(Path.GetFullPath(path));
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException) { }
+        }
         var roots = Profiles.ToDictionary(p => p, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         var shortcuts = new List<Shortcut>();
         void Add(Profile game, string? path)
@@ -63,6 +82,11 @@ public static class AdditionalGames
                     if (key.StartsWith("Steam App ", StringComparison.OrdinalIgnoreCase)) continue;
                     using var entry = uninstall!.OpenSubKey(key);
                     string name = entry?.GetValue("DisplayName") as string ?? "";
+                    if (Launcher(name))
+                    {
+                        AddHint(entry?.GetValue("InstallLocation") as string);
+                        if (entry?.GetValue("DisplayIcon") is string icon) AddHint(Path.GetDirectoryName(icon.Split(',')[0].Trim('"')));
+                    }
                     foreach (var game in Profiles.Where(p => Matches(p, name)))
                     {
                         Add(game, entry?.GetValue("InstallLocation") as string);
@@ -72,6 +96,11 @@ public static class AdditionalGames
                             Add(game, Path.GetDirectoryName(file));
                         }
                     }
+                }
+                foreach (var game in Profiles.Where(g => g.Executable is not null))
+                {
+                    using var entry = registry.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\" + game.Executable);
+                    if (entry?.GetValue(null) is string path) Add(game, Path.GetDirectoryName(path.Trim('"')));
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException) { }
@@ -84,7 +113,7 @@ public static class AdditionalGames
             foreach (string file in Files(Environment.GetFolderPath(kind), 3, 2048, token).Where(f => f.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)))
             {
                 var games = Profiles.Where(p => Matches(p, Path.GetFileNameWithoutExtension(file))).ToArray();
-                if (games.Length != 1) continue;
+                if (games.Length == 0 && !Launcher(file)) continue;
                 object? shortcut = null;
                 try
                 {
@@ -94,9 +123,17 @@ public static class AdditionalGames
                     if (!File.Exists(target) || Excluded(target) || arguments.Contains("steam", StringComparison.OrdinalIgnoreCase)
                         || !target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
                         || new[] { "mumu", "bluestacks", "ldplayer", "dnplayer", "nox", "unins", "setup" }.Any(x => Path.GetFileName(target).Contains(x, StringComparison.OrdinalIgnoreCase))) continue;
-                    shortcuts.Add(new(games[0], file, target));
-                    Add(games[0], Path.GetDirectoryName(target));
-                    Add(games[0], ((dynamic)shortcut).WorkingDirectory as string);
+                    if (Launcher(file) || Launcher(target))
+                    {
+                        string? directory = Path.GetDirectoryName(target); AddHint(directory);
+                        if (string.Equals(Path.GetFileName(directory), "bin", StringComparison.OrdinalIgnoreCase)) AddHint(Path.GetDirectoryName(directory));
+                    }
+                    foreach (var game in games)
+                    {
+                        shortcuts.Add(new(game, file, target));
+                        Add(game, Path.GetDirectoryName(target));
+                        Add(game, ((dynamic)shortcut).WorkingDirectory as string);
+                    }
                 }
                 catch (Exception ex) when (ex is COMException or IOException or UnauthorizedAccessException or ArgumentException) { }
                 finally { if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut); }
@@ -111,14 +148,47 @@ public static class AdditionalGames
         foreach (string folder in new[] { "", "Games", "Program Files", "Program Files (x86)", "DMMGames" }) containers.Add(Path.Combine(drive.RootDirectory.FullName, folder));
         containers.Add(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
         containers.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "DMMGames"));
+        foreach (var container in containers)
+        foreach (string launcher in new[] { "", "HoYoPlay", "HoYoverse", "miHoYo Launcher", "HoYoverse/miHoYo Launcher", "Hypergryph", "Hypergryph Launcher", "GRYPHLINK", "鹰角网络", "鹰角启动器", "YostarGames", "Arknights/YostarGames" }) AddHint(Path.Combine(container, launcher));
         foreach (var game in Profiles)
         foreach (var container in containers)
         foreach (var alias in game.Aliases) Add(game, Path.Combine(container, alias));
+
+        foreach (var root in roots.Values.SelectMany(r => r)) AddHint(root);
+
+        var configs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in hints) { configs.Add(Path.Combine(folder, "config.ini")); configs.Add(Path.Combine(folder, "config.json")); }
+        foreach (var kind in new[] { Environment.SpecialFolder.ApplicationData, Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolder.CommonApplicationData })
+            foreach (var launcher in new[] { "HYP", "Hypergryph", "GRYPHLINK" })
+                foreach (var file in new[] { "config.ini", "config.json" }) configs.Add(Path.Combine(Environment.GetFolderPath(kind), launcher, file));
+        foreach (var file in configs)
+        {
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                if (!File.Exists(file) || new FileInfo(file).Length > 2 * 1024 * 1024) continue;
+                string content = File.ReadAllText(file).Replace("\\\"", "\"");
+                foreach (Match match in Regex.Matches(content, "\"(?:installPath|persistentInstallPath|gameInstallPath|gamePath|install_path|game_install_path)\"\\s*:\\s*\"(?<path>[^\"\\r\\n]+)\"|^\\s*(?:game_install_path|install_path|installPath|gameInstallPath)\\s*=\\s*(?<ini>[^\\r\\n]+)", RegexOptions.Multiline, TimeSpan.FromSeconds(1))) AddHint((match.Groups["path"].Success ? match.Groups["path"].Value : match.Groups["ini"].Value).Trim().Trim('"').Replace("\\\\", "\\").Replace("\\/", "/"));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or RegexMatchTimeoutException) { }
+        }
 
         var result = new Dictionary<string, LaunchTask>(StringComparer.OrdinalIgnoreCase);
         foreach (var game in Profiles)
         {
             var binaries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (game.Executable is not null)
+            {
+                foreach (var root in hints.Concat(roots[game]).Distinct(StringComparer.OrdinalIgnoreCase))
+                foreach (string container in new[] { "", "games", "Game" })
+                foreach (string suffix in new[] { "" }.Concat(game.Aliases))
+                {
+                    token.ThrowIfCancellationRequested();
+                    string file = Path.Combine(root, container, suffix, game.Executable);
+                    if (File.Exists(file)) binaries.Add(file);
+                }
+            }
+            else
             foreach (var root in roots[game])
             foreach (var file in Files(root, 5, 4096, token).Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
             {
@@ -139,10 +209,10 @@ public static class AdditionalGames
             }
             foreach (var file in binaries)
             {
-                var links = shortcuts.Where(s => s.Game == game && (string.Equals(s.Target, file, StringComparison.OrdinalIgnoreCase)
+                var links = shortcuts.Where(s => game.Executable is null && s.Game == game && (string.Equals(s.Target, file, StringComparison.OrdinalIgnoreCase)
                     || file.StartsWith(Path.GetDirectoryName(s.Target)! + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))).ToArray();
                 // A remote launcher may live outside the game directory; only use it when unambiguous.
-                var link = links.FirstOrDefault() ?? (binaries.Count == 1 && shortcuts.Count(s => s.Game == game) == 1 ? shortcuts.Single(s => s.Game == game) : null);
+                var link = links.FirstOrDefault() ?? (game.Executable is null && binaries.Count == 1 && shortcuts.Count(s => s.Game == game) == 1 ? shortcuts.Single(s => s.Game == game) : null);
                 // DMM authentication cannot be replaced by running umamusume.exe directly.
                 if (link is null && (game.Name == "赛马娘" || file.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase))) continue;
                 string launch = link?.Path ?? file;
@@ -153,6 +223,7 @@ public static class AdditionalGames
         }
         return result.Values.ToList();
     }
+    private static bool Launcher(string value) => new[] { "hoyoplay", "mihoyo", "米哈游", "hypergryph", "gryphlink", "鹰角", "yostar" }.Any(w => value.Contains(w, StringComparison.OrdinalIgnoreCase));
     private static IEnumerable<string> Files(string root, int depth, int budget, CancellationToken token)
     {
         var queue = new Queue<(string Path, int Depth)>(); queue.Enqueue((root, 0));

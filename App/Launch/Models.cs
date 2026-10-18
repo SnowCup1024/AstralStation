@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json.Serialization;
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 public sealed class LaunchTask : INotifyPropertyChanged
 {

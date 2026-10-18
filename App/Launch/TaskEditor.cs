@@ -2,7 +2,7 @@ using AstralStation.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 public static class TaskEditor
 {

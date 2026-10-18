@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 public sealed class WindowsProcessHost
 {

@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
 
-namespace AstralStation.Modules.Launch;
+namespace AstralStation.Launch;
 
 public sealed class HistoryView : Grid
 {

@@ -1,4 +1,4 @@
-using AstralStation.Modules.Launch;
+using AstralStation.Launch;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
