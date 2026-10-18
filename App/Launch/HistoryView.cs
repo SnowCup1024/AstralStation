@@ -32,7 +32,7 @@ public sealed class HistoryView : Grid
         RowDefinitions.Add(new() { Height = GridLength.Auto });
         RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); RowSpacing = 0;
         Children.Add(notice); Children.Add(content); SetRow(content, 1);
-        content.ColumnDefinitions.Add(new() { Width = new(332) });
+        content.ColumnDefinitions.Add(new() { Width = new(308) });
         content.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new() { Height = GridLength.Auto });
         content.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
@@ -48,17 +48,18 @@ public sealed class HistoryView : Grid
         previous.Click += (_, _) => MoveMonth(-1); next.Click += (_, _) => MoveMonth(1);
         left.Children.Add(header); left.Children.Add(calendar);
         for (int i = 0; i < 7; i++) calendar.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
-        var leftCard = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = left, VerticalAlignment = VerticalAlignment.Top };
-        content.Children.Add(leftCard);
-        var detail = new Grid { RowSpacing = 14, MinHeight = 260 };
+        var leftCard = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = new ScrollViewer { Content = left, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        content.Children.Add(leftCard); SetRowSpan(leftCard, 2);
+        var detail = new Grid { RowSpacing = 14 };
         detail.RowDefinitions.Add(new() { Height = GridLength.Auto }); detail.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         detail.Children.Add(dateTitle); detail.Children.Add(records); SetRow(records, 1); detail.Children.Add(empty); SetRow(empty, 1);
         var detailCard = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = detail };
         content.Children.Add(detailCard); SetColumn(detailCard, 1); SetRowSpan(detailCard, 2);
         SizeChanged += (_, _) =>
         {
-            bool wide = ActualWidth >= 720;
-            content.ColumnDefinitions[0].Width = wide ? new(332) : new(1, GridUnitType.Star);
+            bool wide = ActualWidth >= 620;
+            SetRowSpan(leftCard, wide ? 2 : 1);
+            content.ColumnDefinitions[0].Width = wide ? new(308) : new(1, GridUnitType.Star);
             content.ColumnDefinitions[1].Width = wide ? new(1, GridUnitType.Star) : new(0);
             SetColumn(detailCard, wide ? 1 : 0); SetRow(detailCard, wide ? 0 : 1); SetRowSpan(detailCard, wide ? 2 : 1);
         };

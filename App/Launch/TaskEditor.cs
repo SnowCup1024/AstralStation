@@ -32,7 +32,7 @@ public static class TaskEditor
         Group("启动方式", args, directory);
         Group("等待与检测", delay, timeout);
         panel.Children.Add(status);
-        var form = new ScrollViewer { Content = panel, MaxHeight = 320 };
+        var form = new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         var heading = new Grid { Width = 440, ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition());
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

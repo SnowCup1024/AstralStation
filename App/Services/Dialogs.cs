@@ -14,17 +14,17 @@ public sealed class Dialogs(Window window, FrameworkElement root, LaunchSession 
         if (Busy) return ContentDialogResult.None;
         Busy = true; using var scope = session.Interaction();
         dialog.XamlRoot = root.XamlRoot; dialog.RequestedTheme = root.ActualTheme;
-        try { return await ShowInPlace(dialog, (Grid)root); } finally { Busy = false; }
-    }
-    public static async Task<ContentDialogResult> ShowInPlace(ContentDialog dialog, Grid root)
-    {
-        // Keep the entire dialog in the same scaled coordinate space as the application.
-        Grid.SetRowSpan(dialog, root.RowDefinitions.Count);
-        dialog.MaxHeight = Math.Min(dialog.MaxHeight, root.Height - 24);
-        dialog.MaxWidth = Math.Min(dialog.MaxWidth, root.Width - 48);
-        root.Children.Add(dialog);
-        try { return await dialog.ShowAsync(ContentDialogPlacement.InPlace); }
-        finally { root.Children.Remove(dialog); }
+        void Fit()
+        {
+            dialog.MaxWidth = Math.Max(280, root.ActualWidth - 32);
+            dialog.MaxHeight = Math.Max(240, root.ActualHeight - 32);
+            if (dialog.Content is ScrollViewer form) form.MaxHeight = Math.Max(120, root.ActualHeight - 200);
+        }
+        void Resized(object sender, SizeChangedEventArgs args) => Fit();
+        root.SizeChanged += Resized;
+        Fit();
+        try { return await dialog.ShowAsync(); }
+        finally { root.SizeChanged -= Resized; Busy = false; }
     }
     public Task Error(string message) => Show(new() { Title = "操作未完成", Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 }, CloseButtonText = "知道了" });
     public async Task<bool> Confirm(string title, string message) => await Show(new() { Title = title, Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 }, PrimaryButtonText = "确认", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close }) == ContentDialogResult.Primary;

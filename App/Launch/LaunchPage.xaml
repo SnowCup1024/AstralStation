@@ -3,7 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:launch="using:AstralStation.Launch"
  xmlns:services="using:AstralStation.Services">
- <Grid Margin="24,16,24,16" RowSpacing="0" AllowDrop="True" DragOver="FilesOver" Drop="FilesDrop">
+ <Grid Margin="16,12,16,12" RowSpacing="0" AllowDrop="True" DragOver="FilesOver" Drop="FilesDrop">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
   <Grid ColumnSpacing="12" Padding="0,0,0,8" BorderThickness="0,0,0,1" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -15,11 +15,11 @@
    <PivotItem Margin="0" AutomationProperties.Name="今日队列"><PivotItem.Header><TextBlock Text="今日队列" FontSize="16"/></PivotItem.Header>
     <Grid RowSpacing="12">
      <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <Border Style="{StaticResource SectionCard}"><ScrollViewer x:Name="QueueScroll" SizeChanged="QueueSizeChanged" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled" HorizontalContentAlignment="Stretch">
+     <Border Style="{StaticResource SectionCard}"><Grid x:Name="QueueFrame" SizeChanged="QueueSizeChanged">
       <Grid x:Name="QueueLayout" ColumnSpacing="20" RowSpacing="16">
        <Grid.ColumnDefinitions><ColumnDefinition Width="252"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="0"/></Grid.RowDefinitions>
-       <StackPanel x:Name="RingPanel" Spacing="16" VerticalAlignment="Top" HorizontalAlignment="Stretch">
+       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel x:Name="RingPanel" Spacing="16" VerticalAlignment="Top" HorizontalAlignment="Stretch">
         <Viewbox x:Name="RingViewport" Width="224" Height="224" Stretch="Uniform" HorizontalAlignment="Center"><Grid Width="224" Height="224">
          <services:CompletionRing x:Name="Progress"/>
          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8" MaxWidth="170">
@@ -30,10 +30,10 @@
         </Grid></Viewbox>
         <TextBlock x:Name="Summary" TextAlignment="Center" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Button x:Name="PauseButton" Click="Pause" Content="暂停自动队列" HorizontalAlignment="Center"/>
-       </StackPanel>
+       </StackPanel></ScrollViewer>
        <Grid x:Name="QueueContent" Grid.Column="1"><ListView x:Name="QueueList" SelectionMode="Single" KeyDown="TaskKey" DoubleTapped="DoubleRun" RightTapped="TaskMenu" HorizontalContentAlignment="Stretch" SelectionChanged="SelectionChanged">
       <ListView.ItemTemplate><DataTemplate x:DataType="launch:LaunchTask"><Grid Padding="8,10" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><services:GameIcon Width="52" Height="52" Path="{x:Bind Path, Mode=OneWay}" VerticalAlignment="Center"/><StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><services:PathLabel Text="{Binding Path}"/><TextBlock Text="{x:Bind Completion, Mode=OneWay}" FontSize="12" TextWrapping="NoWrap"/></StackPanel><TextBlock Grid.Column="2" Text="{x:Bind Status, Mode=OneWay}" VerticalAlignment="Center" TextAlignment="Right" MaxWidth="160" FontSize="13"/></Grid></DataTemplate></ListView.ItemTemplate>
-     </ListView><TextBlock x:Name="EmptyQueue" Text="还没有任务。添加一个游戏或脚本，开始安排今日队列。" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="340"/></Grid></Grid></ScrollViewer></Border>
+     </ListView><TextBlock x:Name="EmptyQueue" Text="还没有任务。添加一个游戏或脚本，开始安排今日队列。" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="340"/></Grid></Grid></Grid></Border>
      <Border x:Name="QueueActions" Grid.Row="1" Visibility="Collapsed" Style="{StaticResource SectionCard}" Padding="12"><ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="RunButton" Content="启动此任务" Click="RunSelected" Style="{StaticResource AccentButtonStyle}"/><Button x:Name="RetryButton" Content="重试此任务" Click="RetrySelected"/><Button Content="此任务标注为完成" Click="MarkSelected"/><Button Content="重置全部任务进度" Click="ResetAll"/></StackPanel></ScrollViewer></Border>
     </Grid>
    </PivotItem>

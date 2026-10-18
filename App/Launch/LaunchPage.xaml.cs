@@ -60,18 +60,14 @@ public sealed partial class LaunchPage : UserControl
     }
     private void QueueSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        double width = Math.Max(1, e.NewSize.Width - 12);
-        QueueLayout.Width = width;
-        bool wide = width >= 640;
-        QueueLayout.ColumnSpacing = wide ? 20 : 0;
-        QueueLayout.RowSpacing = wide ? 0 : 16;
-        // The entire application is scaled from a fixed design; do not scale just the ring.
-        RingViewport.Width = RingViewport.Height = 224;
-        QueueLayout.ColumnDefinitions[0].Width = wide ? new GridLength(252) : new GridLength(1, GridUnitType.Star);
-        QueueLayout.ColumnDefinitions[1].Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        QueueLayout.RowDefinitions[0].Height = GridLength.Auto;
-        QueueLayout.RowDefinitions[1].Height = wide ? new GridLength(0) : GridLength.Auto;
-        Grid.SetColumn(QueueContent, wide ? 1 : 0); Grid.SetRow(QueueContent, wide ? 0 : 1);
+        // Lists have their own viewport; selecting a task cannot scroll the summary out of view.
+        double columnWidth = e.NewSize.Width < 700 ? 204 : 252;
+        double diameter = Math.Clamp(Math.Min(e.NewSize.Height - 100, columnWidth - 16), 144, 224);
+        RingViewport.Width = RingViewport.Height = diameter;
+        RingPanel.Spacing = e.NewSize.Height < 320 ? 8 : 16;
+        QueueLayout.ColumnDefinitions[0].Width = new GridLength(columnWidth);
+        QueueLayout.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
+        QueueLayout.RowDefinitions[1].Height = new GridLength(0);
     }
     private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
     private void SelectionChanged(object sender, SelectionChangedEventArgs e) => Refresh();

@@ -41,7 +41,6 @@ public sealed class LaunchTask : INotifyPropertyChanged
 public sealed class LaunchSettings
 {
     public string Theme { get; set; } = "Default";
-    public int WindowHeight { get; set; }
     public bool AutoClose { get; set; }
     public bool Tray { get; set; }
     public bool CloseToTray { get; set; }

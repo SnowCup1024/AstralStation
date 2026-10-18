@@ -1,16 +1,14 @@
 <Window x:Class="AstralStation.MainWindow"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="星间驿站">
- <Viewbox x:Name="WindowScale" Stretch="Uniform"><Grid x:Name="Root" Width="960" Height="540" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
-  <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-  <Grid x:Name="TitleBar" Background="Transparent">
-   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-   <Grid Background="Transparent" PointerPressed="DragTitleBar"><StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0" VerticalAlignment="Center">
-    <Image Source="ms-appx:///Assets/App.png" Width="24" Height="24"/>
+ <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <Grid x:Name="TitleBar" Background="Transparent" Margin="0,0,140,0">
+   <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0" VerticalAlignment="Center">
+    <Image Source="ms-appx:///Assets/App.png" Width="20" Height="20"/>
     <TextBlock Text="星间驿站" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    <TextBlock Text="Alpha 2.0.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
-   </StackPanel></Grid>
-   <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Width="48" Height="48" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="0" Click="MinimizeWindow" AutomationProperties.Name="最小化" ToolTipService.ToolTip="最小化"><FontIcon Glyph="&#xE921;" FontSize="12"/></Button><Button Width="48" Height="48" Padding="0" Background="Transparent" BorderThickness="0" CornerRadius="0" Click="CloseWindow" AutomationProperties.Name="关闭" ToolTipService.ToolTip="关闭"><FontIcon Glyph="&#xE8BB;" FontSize="12"/></Button></StackPanel>
+    <TextBlock Text="Alpha 2.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="12"/>
+   </StackPanel>
   </Grid>
   <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="LeftCompact" OpenPaneLength="208"
    IsBackButtonVisible="Collapsed" IsSettingsVisible="False" SelectionChanged="Navigate">
@@ -23,5 +21,5 @@
    </NavigationView.FooterMenuItems>
    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
   </NavigationView>
- </Grid></Viewbox>
+ </Grid>
 </Window>

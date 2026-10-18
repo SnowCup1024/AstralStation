@@ -1,4 +1,3 @@
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -17,9 +16,6 @@ public sealed partial class MainWindow : Window
     private readonly LaunchSession session;
     private readonly DesktopHost desktop;
     private readonly Dialogs dialogs;
-    private readonly WindowSizing sizing;
-    private ComboBox? windowSize;
-    private bool updatingWindowSize;
     private LaunchPage? launchPage;
     private string activeRoute = "launch";
     private bool forceExit, closed, keepOpen, restoreAfterRuns;
@@ -35,15 +31,20 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         session = new(dataRoot, paused, DispatcherQueue);
-        sizing = new(AppWindow, DispatcherQueue, session.Store.Settings.WindowHeight);
-        sizing.Changed += RefreshWindowSize;
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(TitleBar);
+        double scale = DesktopHost.GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96d;
+        var work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        int width = Math.Min(work.Width, (int)(1040 * scale));
+        int height = Math.Min(work.Height, (int)(760 * scale));
+        AppWindow.MoveAndResize(new RectInt32(work.X + (work.Width - width) / 2, work.Y + (work.Height - height) / 2, width, height));
         desktop = new(WinRT.Interop.WindowNative.GetWindowHandle(this), dataRoot);
         dialogs = new(this, Root, session);
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 2.0.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 2.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -64,31 +65,9 @@ public sealed partial class MainWindow : Window
             if (session.Interacting || session.Scheduler.Launching) { args.Cancel = true; session.DiscoveryCancellation?.Cancel(); return; }
             if (session.Store.Settings.Tray && session.Store.Settings.CloseToTray) { args.Cancel = true; desktop.Minimize(); }
         };
-        Closed += (_, _) => { closed = true; completionDialog?.Hide(); sizing.Dispose(); session.Dispose(); desktop.Dispose(); };
+        Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += (_, _) => { session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize(); };
     }
-    private void DragTitleBar(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs args)
-    {
-        if (!args.GetCurrentPoint(TitleBar).Properties.IsLeftButtonPressed) return;
-        ReleaseCapture();
-        SendMessageW(WinRT.Interop.WindowNative.GetWindowHandle(this), 0xA1, 2, 0);
-        args.Handled = true;
-    }
-    private void MinimizeWindow(object sender, RoutedEventArgs args) => desktop.Minimize();
-    private void CloseWindow(object sender, RoutedEventArgs args) => Close();
-    private void RefreshWindowSize()
-    {
-        if (windowSize is null) return;
-        updatingWindowSize = true;
-        try
-        {
-            foreach (ComboBoxItem item in windowSize.Items) item.IsEnabled = sizing.Available((int)item.Tag);
-            windowSize.SelectedIndex = Array.IndexOf(WindowSizing.Heights, sizing.Height);
-        }
-        finally { updatingWindowSize = false; }
-    }
-    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ReleaseCapture();
-    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern nint SendMessageW(nint window, uint message, nuint wParam, nint lParam);
     private void Navigate(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is not NavigationViewItem { Tag: string key } || !routes.TryGetValue(key, out var factory)) return;
@@ -114,21 +93,6 @@ public sealed partial class MainWindow : Window
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
         ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);
-        windowSize = new ComboBox { Header = "窗口尺寸", MinWidth = 300 };
-        string[] labels = ["720P · 960 × 540", "1080P · 1440 × 810", "1440P · 1920 × 1080", "2160P · 2880 × 1620"];
-        for (int i = 0; i < labels.Length; i++) windowSize.Items.Add(new ComboBoxItem { Content = labels[i], Tag = WindowSizing.Heights[i] });
-        RefreshWindowSize();
-        windowSize.SelectionChanged += async (_, _) =>
-        {
-            if (updatingWindowSize || windowSize.SelectedItem is not ComboBoxItem { Tag: int height } || !sizing.Available(height)) return;
-            try
-            {
-                var next = session.Store.Settings.Clone(); next.WindowHeight = height;
-                session.Store.SaveSettings(next); sizing.Select(height);
-            }
-            catch (Exception ex) { RefreshWindowSize(); await dialogs.Error(ex.Message); }
-        };
-        ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(windowSize);
         return new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
     private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) closeDeadline = Scheduler.Seconds + 15; desktop.Restore(); }
@@ -169,67 +133,7 @@ public sealed partial class MainWindow : Window
         completionDialog = dialog;
         dialog.CloseButtonClick += (_, _) => { keepOpen = true; closeDeadline = null; };
         dialog.KeyDown += (_, e) => { if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Escape) { keepOpen = true; closeDeadline = null; dialog.Hide(); e.Handled = true; } };
-        try { await Dialogs.ShowInPlace(dialog, Root); if (closeDeadline is not null && !closed) { keepOpen = true; closeDeadline = null; } }
+        try { await dialog.ShowAsync(); if (closeDeadline is not null && !closed) { keepOpen = true; closeDeadline = null; } }
         finally { completionDialog = null; countdownText = null; }
     }
-}
-
-public sealed class WindowSizing : IDisposable
-{
-    public static readonly int[] Heights = [540, 810, 1080, 1620];
-    private readonly AppWindow window;
-    private readonly DispatcherQueue dispatcher;
-    private bool queued, applying, disposed;
-    private int requested;
-    public int Height { get; private set; }
-    public event Action? Changed;
-    public WindowSizing(AppWindow window, DispatcherQueue dispatcher, int requested)
-    {
-        this.window = window; this.dispatcher = dispatcher; this.requested = requested;
-        var presenter = (OverlappedPresenter)window.Presenter;
-        presenter.IsResizable = false;
-        presenter.IsMaximizable = false;
-        presenter.SetBorderAndTitleBar(false, false);
-        window.Changed += WindowChanged;
-        Apply(true);
-    }
-    private DisplayArea Display => DisplayArea.GetFromWindowId(window.Id, DisplayAreaFallback.Primary);
-    public bool Available(int height)
-    {
-        var display = Display;
-        return height <= display.OuterBounds.Height * .75 && height * 16 / 9 <= display.OuterBounds.Width * .75
-            && height <= display.WorkArea.Height && height * 16 / 9 <= display.WorkArea.Width;
-    }
-    public void Select(int height) { requested = height; Apply(true); }
-    private void WindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
-    {
-        if (disposed || applying || queued || (!args.DidSizeChange && !args.DidPositionChange)) return;
-        queued = true;
-        dispatcher.TryEnqueue(() => { queued = false; if (!disposed) Apply(false); });
-    }
-    private void Apply(bool center)
-    {
-        if (applying) return;
-        applying = true;
-        try
-        {
-            int maximum = Heights.Where(Available).DefaultIfEmpty(540).Max();
-            Height = Heights.Contains(requested) ? Math.Min(requested, maximum) : maximum;
-            var presenter = (OverlappedPresenter)window.Presenter;
-            if (presenter.State == OverlappedPresenterState.Minimized) return;
-            if (presenter.State == OverlappedPresenterState.Maximized) presenter.Restore();
-            int width = Height * 16 / 9;
-            bool resized = window.Size.Width != width || window.Size.Height != Height;
-            if (resized) window.Resize(new SizeInt32(width, Height));
-            // Ordinary dragging must remain free to cross monitor boundaries.
-            if (!center && !resized) { Changed?.Invoke(); return; }
-            var work = Display.WorkArea;
-            int x = center ? work.X + (work.Width - width) / 2 : Math.Clamp(window.Position.X, work.X, Math.Max(work.X, work.X + work.Width - width));
-            int y = center ? work.Y + (work.Height - Height) / 2 : Math.Clamp(window.Position.Y, work.Y, Math.Max(work.Y, work.Y + work.Height - Height));
-            if (window.Position.X != x || window.Position.Y != y) window.Move(new PointInt32(x, y));
-            Changed?.Invoke();
-        }
-        finally { applying = false; }
-    }
-    public void Dispose() { disposed = true; window.Changed -= WindowChanged; }
 }

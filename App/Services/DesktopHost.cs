@@ -96,6 +96,15 @@ public sealed class DesktopHost : IDisposable
     {
         try
         {
+            if (message == 0x24) // WM_GETMINMAXINFO: device-independent minimum, recalculated on each monitor.
+            {
+                DefSubclassProc(hwnd, message, wParam, lParam);
+                var limits = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+                double scale = GetDpiForWindow(hwnd) / 96d;
+                limits.MinTrackSize = new Point { X = (int)Math.Ceiling(800 * scale), Y = (int)Math.Ceiling(600 * scale) };
+                Marshal.StructureToPtr(limits, lParam, false);
+                return 0;
+            }
             if (message == RestoreMessage) { RestoreRequested?.Invoke(); return 0; }
             if (message == UpgradeMessage) { UpgradeRequested?.Invoke(); return 0; }
             if (message == taskbarCreated && tray) { if (!Shell_NotifyIconW(0, ref data)) { tray = false; Restore(); } }
@@ -165,6 +174,8 @@ public sealed class DesktopHost : IDisposable
         public uint InfoFlags; public Guid Guid; public nint BalloonIcon;
     }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct MinMaxInfo { public Point Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize; }
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(nint window);
     private delegate nint SubclassProc(nint hwnd, uint message, nuint wParam, nint lParam, nuint id, nuint reference);
     private delegate bool EnumProc(nint hwnd, nint param);
     [DllImport("comctl32.dll")] private static extern bool SetWindowSubclass(nint hwnd, SubclassProc proc, nuint id, nuint reference);
