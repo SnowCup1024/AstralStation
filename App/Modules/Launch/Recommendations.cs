@@ -93,6 +93,7 @@ public static class Recommendations
             token.ThrowIfCancellationRequested(); string path = Path.GetFullPath(Path.Combine(folder, container, suffix, game.Executable));
             if (File.Exists(path)) found.TryAdd(path, new() { Name = game.Name, Path = path, ProcessNames = [Path.GetFileNameWithoutExtension(game.Executable)] });
         }
+        foreach (var task in AdditionalGames.Detect(token)) found.TryAdd(task.Path, task);
         return found.Values.ToList();
     }
 }
