@@ -6,8 +6,9 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <x:Double x:Key="ControlContentThemeFontSize">15</x:Double>
             <Style TargetType="TextBlock">
-                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontSize" Value="15" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
             <Style TargetType="TextBox">
@@ -27,7 +28,7 @@
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="8" />
                 <Setter Property="Padding" Value="10,7" />
-                <Setter Property="FontSize" Value="14" />
+                <Setter Property="FontSize" Value="15" />
             </Style>
             <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}"><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="14,9"/></Style>
             <Style x:Key="ContentDialogPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}" />
@@ -40,12 +41,12 @@
                 <Setter Property="CornerRadius" Value="8" />
             </Style>
             <Style x:Key="PageTitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="22" />
+                <Setter Property="FontSize" Value="23" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
             <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="16" />
+                <Setter Property="FontSize" Value="17" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>

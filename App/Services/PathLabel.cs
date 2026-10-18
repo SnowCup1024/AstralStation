@@ -9,8 +9,8 @@ public sealed class PathLabel : Grid
 {
     public static readonly DependencyProperty TextProperty = DependencyProperty.Register(nameof(Text), typeof(string), typeof(PathLabel), new PropertyMetadata("", Changed));
     public string Text { get => (string)GetValue(TextProperty); set => SetValue(TextProperty, value); }
-    private readonly TextBlock label = new() { FontSize = 12, TextWrapping = TextWrapping.NoWrap };
-    private readonly TextBlock measure = new() { FontSize = 12, TextWrapping = TextWrapping.NoWrap };
+    private readonly TextBlock label = new() { FontSize = 13, TextWrapping = TextWrapping.NoWrap };
+    private readonly TextBlock measure = new() { FontSize = 13, TextWrapping = TextWrapping.NoWrap };
     public PathLabel()
     {
         MinWidth = 0; Children.Add(label);

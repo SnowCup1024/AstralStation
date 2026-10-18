@@ -13,13 +13,13 @@ public sealed class HistoryView : Grid
     private readonly Dialogs dialogs;
     private readonly Grid content = new() { ColumnSpacing = 16, RowSpacing = 16 };
     private readonly Grid calendar = new() { ColumnSpacing = 1, RowSpacing = 1 };
-    private readonly TextBlock monthTitle = new() { FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock monthTitle = new() { FontSize = 17, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button previous = new() { Content = new FontIcon { Glyph = "\uE76B", FontSize = 14 }, Padding = new(10) };
     private readonly Button next = new() { Content = new FontIcon { Glyph = "\uE76C", FontSize = 14 }, Padding = new(10) };
     private DateTime month = new(DateTime.Today.Year, DateTime.Today.Month, 1);
-    private readonly TextBlock dateTitle = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly TextBlock dateTitle = new() { FontSize = 19, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private readonly TextBlock empty = new() { Text = "选择有标记的日期，查看当天的运行记录。", TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 260 };
-    private readonly TextBlock notice = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+    private readonly TextBlock notice = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap, FontSize = 13 };
     private readonly ListView records = new() { SelectionMode = ListViewSelectionMode.Single, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private List<string> available = [];
     private string? selected;
@@ -136,7 +136,7 @@ public sealed class HistoryView : Grid
                 var panel = new StackPanel { Spacing = 1 };
                 panel.VerticalAlignment = VerticalAlignment.Center;
                 panel.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 12, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+                panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 13, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
                 var row = new Grid { ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new() { Width = new(52) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
                 var icon = new GameIcon { Path = record.Path };

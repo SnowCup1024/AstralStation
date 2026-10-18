@@ -36,8 +36,8 @@ public static class TaskEditor
         var heading = new Grid { Width = 440, ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition());
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        heading.Children.Add(new TextBlock { Text = options ? "启动选项" : isNew ? "添加任务" : "编辑任务", FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-        var detect = new Button { Content = "检测已安装游戏", FontSize = 14, Visibility = isNew && !options ? Visibility.Visible : Visibility.Collapsed };
+        heading.Children.Add(new TextBlock { Text = options ? "启动选项" : isNew ? "添加任务" : "编辑任务", FontSize = 21, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        var detect = new Button { Content = "检测已安装游戏", FontSize = 15, Visibility = isNew && !options ? Visibility.Visible : Visibility.Collapsed };
         Grid.SetColumn(detect, 1); heading.Children.Add(detect);
         var dialog = new ContentDialog { Title = heading, Content = form, PrimaryButtonText = isNew ? "添加" : "保存", CloseButtonText = "取消", DefaultButton = ContentDialogButton.None };
         bool detecting = false;

@@ -63,7 +63,7 @@ public sealed partial class LaunchPage : UserControl
     {
         // Lists have their own viewport; selecting a task cannot scroll the summary out of view.
         double columnWidth = e.NewSize.Width < 700 ? 204 : 252;
-        double diameter = Math.Clamp(Math.Min(e.NewSize.Height - 100, columnWidth - 16), 144, 224);
+        double diameter = Math.Clamp(Math.Min(e.NewSize.Height - 100, columnWidth - 16), 144, 200);
         RingViewport.Width = RingViewport.Height = diameter;
         RingPanel.Spacing = e.NewSize.Height < 320 ? 8 : 16;
         QueueLayout.ColumnDefinitions[0].Width = new GridLength(columnWidth);
