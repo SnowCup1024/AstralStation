@@ -38,6 +38,7 @@ public sealed partial class LaunchPage : UserControl
     private void Reload()
     {
         string? selected = (LibraryList.SelectedItem as LaunchTask)?.Id, queue = (QueueList.SelectedItem as LaunchTask)?.Id;
+        for (int i = 0; i < session.Store.Tasks.Count; i++) session.Store.Tasks[i].Order = i + 1;
         library.Clear(); foreach (var task in session.Store.Tasks) library.Add(task);
         QueueList.ItemsSource = session.Store.Tasks;
         LibraryList.SelectedItem = library.FirstOrDefault(t => t.Id == selected); QueueList.SelectedItem = session.Store.Tasks.FirstOrDefault(t => t.Id == queue);

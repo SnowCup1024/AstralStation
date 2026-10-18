@@ -15,6 +15,8 @@ public sealed class LaunchTask : INotifyPropertyChanged
     public string WorkingDirectory { get; set; } = "";
     public int DelaySeconds { get; set; } = 30;
     public int TimeoutSeconds { get; set; } = 15;
+    private int order;
+    [JsonIgnore] public int Order { get => order; set { if (order == value) return; order = value; PropertyChanged?.Invoke(this, new(nameof(Order))); } }
     private string status = "";
     [JsonIgnore] public string Status { get => status; set { if (status == value) return; status = value; PropertyChanged?.Invoke(this, new(nameof(Status))); } }
     private string completion = "";
