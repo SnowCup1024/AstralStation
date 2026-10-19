@@ -93,7 +93,7 @@ public sealed class HistoryView : Grid
         {
             string key = month.AddDays(day - 1).ToString("yyyy-MM-dd");
             bool hasRecord = available.Contains(key);
-            var button = new Button { Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord, CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
+            var button = new Button { Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord || key == DateTime.Today.ToString("yyyy-MM-dd"), CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
             button.Background = new SolidColorBrush(key == selected ? Windows.UI.Color.FromArgb(255, 62, 101, 185) : Microsoft.UI.Colors.Transparent);
             if (hasRecord) button.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 79, 117, 197));
             if (key == selected) button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
@@ -110,7 +110,11 @@ public sealed class HistoryView : Grid
             var result = session.Store.HistoryDates();
             available = result.Dates.Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).ToList();
             notice.Text = result.Errors.Count == 0 ? "" : "部分记录无法读取：\\n" + string.Join("\\n", result.Errors);
-            if (selected is null || !available.Contains(selected)) selected = available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
+            if (revision < 0)
+            {
+                selected = DateTime.Today.ToString("yyyy-MM-dd");
+                month = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            }
             notice.Visibility = result.Errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             revision = session.Store.Revision; lastDay = DateTime.Today;
             RenderMonth(); RenderRecords();
@@ -120,13 +124,16 @@ public sealed class HistoryView : Grid
     private void MoveMonth(int direction)
     {
         month = month.AddMonths(direction);
-        selected = available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
+        selected = month.Year == DateTime.Today.Year && month.Month == DateTime.Today.Month
+            ? DateTime.Today.ToString("yyyy-MM-dd")
+            : available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
         RenderMonth(); RenderRecords();
     }
     private void RenderRecords()
     {
         string? selectedId = (records.SelectedItem as ListViewItem)?.Tag is LaunchRecord old ? old.Id : null;
         records.Items.Clear(); dateTitle.Text = selected is null ? "运行记录" : selected + " · 运行记录";
+        empty.Text = selected is null ? "本月没有运行记录。" : selected == DateTime.Today.ToString("yyyy-MM-dd") ? "今日没有运行记录。" : "当天没有运行记录。";
         empty.Visibility = selected is null ? Visibility.Visible : Visibility.Collapsed;
         if (selected is null) return;
         try
@@ -144,6 +151,7 @@ public sealed class HistoryView : Grid
                 var item = new ListViewItem { Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = row, Margin = new(0, 4, 0, 4) }, Tag = record, HorizontalContentAlignment = HorizontalAlignment.Stretch }; records.Items.Add(item);
                 if (!string.IsNullOrEmpty(selectedId) && record.Id == selectedId) records.SelectedItem = item;
             }
+            empty.Visibility = records.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex) { notice.Text = ex.Message; notice.Visibility = Visibility.Visible; }
     }

@@ -1,12 +1,12 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.0**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.1**，暂不添加许可证。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含单文件：
 
-`.build/Alpha-3.0/AstralStation.exe`
+`.build/Alpha-3.1/AstralStation.exe`
 
 Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK。
 
