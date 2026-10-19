@@ -9,6 +9,8 @@ public sealed class PathLabel : Grid
 {
     public static readonly DependencyProperty TextProperty = DependencyProperty.Register(nameof(Text), typeof(string), typeof(PathLabel), new PropertyMetadata("", Changed));
     public string Text { get => (string)GetValue(TextProperty); set => SetValue(TextProperty, value); }
+    public static readonly DependencyProperty FontSizeProperty = DependencyProperty.Register(nameof(FontSize), typeof(double), typeof(PathLabel), new PropertyMetadata(13d, Changed));
+    public double FontSize { get => (double)GetValue(FontSizeProperty); set => SetValue(FontSizeProperty, value); }
     private readonly TextBlock label = new() { FontSize = 13, TextWrapping = TextWrapping.NoWrap };
     private readonly TextBlock measure = new() { FontSize = 13, TextWrapping = TextWrapping.NoWrap };
     public PathLabel()
@@ -20,6 +22,7 @@ public sealed class PathLabel : Grid
     private static void Changed(DependencyObject sender, DependencyPropertyChangedEventArgs args) => ((PathLabel)sender).Update();
     private void Update()
     {
+        label.FontSize = measure.FontSize = FontSize;
         string full = Text ?? "";
         ToolTipService.SetToolTip(this, full);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(this, full);

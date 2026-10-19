@@ -35,5 +35,11 @@ public sealed class Dialogs(Window window, FrameworkElement root, LaunchSession 
         foreach (var extension in extensions) picker.FileTypeFilter.Add(extension);
         return (await picker.PickSingleFileAsync())?.Path;
     }
+    public async Task<string?> PickFolder()
+    {
+        using var scope = session.Interaction(); var picker = new FolderPicker(); picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window));
+        return (await picker.PickSingleFolderAsync())?.Path;
+    }
     public static void Copy(string text) { var package = new DataPackage(); package.SetText(text); Clipboard.SetContent(package); Clipboard.Flush(); }
 }

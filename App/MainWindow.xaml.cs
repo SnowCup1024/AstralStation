@@ -43,8 +43,16 @@ public sealed partial class MainWindow : Window
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
+        routes["steam"] = () =>
+        {
+            var args = Environment.GetCommandLineArgs();
+            int at = Array.IndexOf(args, "--steam-root");
+            string? testSteam = at >= 0 && at + 1 < args.Length && args.Contains("--data-dir") ? args[at + 1] : null;
+            try { return new SteamLaunchPage(dialogs, testSteam is null ? null : Path.Combine(dataRoot, "SteamLaunch", SteamLaunch.AppId), testSteam); }
+            catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
+        };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 2.1.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.0", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;

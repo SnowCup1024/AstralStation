@@ -1,12 +1,12 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 2.1.2**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.0**，暂不添加许可证。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含单文件：
 
-`.build/Alpha-2.1.2/AstralStation.exe`
+`.build/Alpha-3.0/AstralStation.exe`
 
 Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK。
 
@@ -17,6 +17,7 @@ Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK�
 - 今日队列：按任务顺序启动、等待、监测与记录，可暂停、重试或手动标记完成。
 - 任务库：添加、编辑、排序、安装检测；所有任务均参加队列。支持程序、快捷方式与脚本。
 - 运行日历：按各任务的每日重置时间归档。退出工具箱不会结束游戏。
+- Steam 启动国服：配置终末地占位 EXE、ACF、启动脚本及 Steam 启动选项；应用和移除前显示具体变更。脚本保存在 `%LOCALAPPDATA%\AstralStation\SteamLaunch\4732690`。
 - 设置：主题、托盘、登录启动，自由调整窗口大小与最大化。最小窗口 800×600 逻辑像素；全界面跟随所在显示器 DPI，窗口变大不再放大控件。
 - 同一数据目录只运行一个实例。新版接管旧版，同版或旧版再次打开时聚焦已有窗口。
 
