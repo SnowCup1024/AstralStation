@@ -427,21 +427,30 @@ internal sealed class SteamLaunch
     public static List<string> Detect(bool launcher, string hint)
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var errors = new List<string>();
         void Add(string? path) { if (!string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path) && Directory.Exists(path)) roots.Add(path); }
         if (File.Exists(hint)) Add(Path.GetDirectoryName(hint)); else Add(hint);
         foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
         foreach (var view in new[] { RegistryView.Registry32, RegistryView.Registry64 })
         {
+            try
+            {
             using var key = RegistryKey.OpenBaseKey(hive, view);
             using var uninstall = key.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall");
             foreach (string child in uninstall?.GetSubKeyNames() ?? [])
             {
+                try
+                {
                 using var entry = uninstall!.OpenSubKey(child);
                 string name = entry?.GetValue("DisplayName") as string ?? "";
                 if (!new[] { "Hypergryph", "鹰角", "终末地", "Endfield" }.Any(s => name.Contains(s, StringComparison.OrdinalIgnoreCase)) || child.StartsWith("Steam App ")) continue;
                 Add(entry?.GetValue("InstallLocation") as string);
                 if (entry?.GetValue("DisplayIcon") is string icon) Add(Path.GetDirectoryName(icon.Trim('"').Split(",")[0].Trim('"')));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException) { errors.Add($"注册表 {child}：{ex.Message}"); }
             }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { errors.Add($"注册表 {hive}/{view}：{ex.Message}"); }
         }
         foreach (var drive in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
         foreach (string folder in new[] { "Hypergryph", "Hypergryph Launcher", @"Hypergryph\Hypergryph Launcher", @"Games\Hypergryph Launcher", @"Program Files\Hypergryph Launcher", @"Program Files (x86)\Hypergryph Launcher" }) Add(Path.Combine(drive.RootDirectory.FullName, folder));
@@ -450,8 +459,9 @@ internal sealed class SteamLaunch
         foreach (string suffix in launcher ? new[] { "", "Hypergryph Launcher" } : new[] { "", @"games\Endfield Game", @"games\Arknights Endfield", @"games\EndField", "Endfield Game" })
         {
             string candidate = Path.Combine(root, suffix, launcher ? "Launcher.exe" : "Endfield.exe");
-            if (!candidate.Split('\\', '/').Contains("steamapps", StringComparer.OrdinalIgnoreCase) && File.Exists(candidate) && new FileInfo(candidate).Length > 0) found.Add(launcher ? candidate : Path.GetDirectoryName(candidate)!);
+            if (!candidate.Split('\\', '/').Contains("steamapps", StringComparer.OrdinalIgnoreCase) && File.Exists(candidate) && new FileInfo(candidate).Length > 0) found.Add(CanonicalPath(launcher ? candidate : Path.GetDirectoryName(candidate)!));
         }
+        if (found.Count == 0 && errors.Count > 0) throw new InvalidOperationException("未识别到安装路径，部分位置读取失败：\n" + string.Join("\n", errors.Distinct().Take(5)));
         return found.Order().ToList();
     }
 
@@ -725,16 +735,27 @@ internal sealed class SteamLaunchPage : Grid
             tile.BorderBrush = new SolidColorBrush(service.Configured() ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
             icon.Path = Path.Combine(service.Config.GameDirectory, "Endfield.exe");
         }
-        catch (Exception ex) { ShowNotice(ex.Message, true); }
+        catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
     }
-    private void ShowNotice(string message, bool error) { notice.Message = message; notice.Severity = error ? InfoBarSeverity.Error : InfoBarSeverity.Success; notice.IsOpen = true; }
+    private void ShowNotice(string message, bool error)
+    {
+        notice.Title = "";
+        notice.Content = null;
+        notice.Message = string.IsNullOrWhiteSpace(message) ? "操作失败，未返回详细信息。" : message;
+        notice.Severity = error ? InfoBarSeverity.Error : InfoBarSeverity.Success; notice.IsOpen = true;
+    }
+    private static string ErrorMessage(Exception error)
+    {
+        var cause = error.GetBaseException();
+        return string.IsNullOrWhiteSpace(cause.Message) ? $"{cause.GetType().Name}（0x{cause.HResult:X8}）：操作失败。" : cause.Message;
+    }
     private async Task CheckVersion() => await Run(async () => { Pull(); Refresh(); if (File.Exists(service.AcfPath)) await service.Fetch(false); });
     private async Task Run(Func<Task> operation)
     {
         if (busy) return;
         busy = true; formHost.IsEnabled = back.IsEnabled = false; notice.IsOpen = false;
         try { await operation(); }
-        catch (Exception ex) { ShowNotice(ex.Message, true); }
+        catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
         finally { busy = false; formHost.IsEnabled = back.IsEnabled = true; Refresh(); }
     }
     private Button Button(string text, Func<Task> action)
@@ -770,8 +791,11 @@ internal sealed class SteamLaunchPage : Grid
     {
         return FieldActions(field, Button("浏览", async () => { string? selected = directory ? await dialogs.PickFolder() : await dialogs.Pick(".exe"); if (selected is not null) field.Text = selected; Pull(); }), Button("自动识别", async () =>
         {
-            var found = await Task.Run(() => SteamLaunch.Detect(!directory, directory ? launcher.Text : field.Text));
-            if (found.Count == 0) throw new InvalidOperationException("未识别到安装路径，请点击浏览选择。");
+            string hint = directory ? launcher.Text : field.Text;
+            var found = await Task.Run(() => SteamLaunch.Detect(!directory, hint));
+            if (found.Count == 0) throw new InvalidOperationException(directory
+                ? "未找到国服 Endfield.exe。已检查官方启动器旁的游戏目录、注册表和常用安装位置；请确认游戏已安装，或点击浏览选择包含 Endfield.exe 的目录。"
+                : "未找到官方 Launcher.exe。已检查注册表和常用鹰角安装位置；请确认官方启动器已安装，或点击浏览选择 Launcher.exe。");
             if (found.Count == 1) field.Text = found[0];
             else
             {
@@ -779,6 +803,7 @@ internal sealed class SteamLaunchPage : Grid
                 if (await dialogs.Show(new ContentDialog { Title = "选择安装路径", Content = choice, PrimaryButtonText = "选择", CloseButtonText = "取消" }) == ContentDialogResult.Primary) field.Text = (string)choice.SelectedItem;
             }
             Pull();
+            ShowNotice((directory ? "已识别国服游戏目录：" : "已识别官方启动器：") + field.Text, false);
         }));
     }
     private StackPanel Card(string title)
