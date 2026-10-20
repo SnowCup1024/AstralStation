@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.1.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -133,7 +133,7 @@ public sealed partial class MainWindow : Window
         countdownText = new TextBlock { Text = $"所有任务已完成，运行记录已保存。\n{remaining} 秒后退出星间驿站。", TextWrapping = TextWrapping.Wrap };
         var body = new StackPanel { Spacing = 16 };
         body.Children.Add(countdownText);
-        var keepButton = new Button { Content = "仅本次", HorizontalAlignment = HorizontalAlignment.Right };
+        var keepButton = new Button { Content = "保持打开（仅本次）", HorizontalAlignment = HorizontalAlignment.Right };
         ToolTipService.SetToolTip(keepButton, "仅本次保持打开");
         body.Children.Add(keepButton);
         var dialog = new ContentDialog { Title = "今日安排已完成", Content = body, XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme };

@@ -1,6 +1,7 @@
 using AstralStation.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
@@ -93,12 +94,23 @@ public sealed class HistoryView : Grid
         {
             string key = month.AddDays(day - 1).ToString("yyyy-MM-dd");
             bool hasRecord = available.Contains(key);
-            var button = new Button { Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord || key == DateTime.Today.ToString("yyyy-MM-dd"), CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
-            button.Background = new SolidColorBrush(key == selected ? Windows.UI.Color.FromArgb(255, 62, 101, 185) : Microsoft.UI.Colors.Transparent);
+            var button = new ToggleButton { Tag = key, IsChecked = key == selected, Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord || key == DateTime.Today.ToString("yyyy-MM-dd"), CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
+            button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            // Selected dates keep the same fill and text through hover and press.
+            foreach (string state in new[] { "Checked", "CheckedPointerOver", "CheckedPressed" })
+            {
+                button.Resources["ToggleButtonBackground" + state] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 62, 101, 185));
+                button.Resources["ToggleButtonForeground" + state] = new SolidColorBrush(Microsoft.UI.Colors.White);
+                button.Resources["ToggleButtonBorderBrush" + state] = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 62, 101, 185));
+            }
             if (hasRecord) button.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 79, 117, 197));
-            if (key == selected) button.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, key);
-            button.Click += (_, _) => { selected = key; RenderMonth(); RenderRecords(); };
+            button.Click += (_, _) =>
+            {
+                selected = key;
+                foreach (var date in calendar.Children.OfType<ToggleButton>()) date.IsChecked = (string)date.Tag == selected;
+                RenderRecords();
+            };
             int cell = offset + day - 1; SetRow(button, cell / 7 + 1); SetColumn(button, cell % 7); calendar.Children.Add(button);
         }
     }
