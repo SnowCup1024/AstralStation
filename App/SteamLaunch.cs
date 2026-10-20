@@ -383,7 +383,7 @@ internal sealed class SteamLaunch
     }
     public void Apply(Plan plan)
     {
-        if (plan.Changes.Any(c => c.Path.EndsWith(".acf", StringComparison.OrdinalIgnoreCase) || c.Path.EndsWith("localconfig.vdf", StringComparison.OrdinalIgnoreCase) || c.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))) checkSteamClosed();
+        if (plan.Changes.Any(c => c.Path.EndsWith(".acf", StringComparison.OrdinalIgnoreCase) || c.Path.EndsWith("localconfig.vdf", StringComparison.OrdinalIgnoreCase))) checkSteamClosed();
         using var mutex = new Mutex(false, @"Local\AstralStation.SteamLaunch.Configure");
         bool acquired; try { acquired = mutex.WaitOne(0); } catch (AbandonedMutexException) { acquired = true; }
         if (!acquired) throw new InvalidOperationException("另一个配置操作正在进行。");
@@ -394,7 +394,13 @@ internal sealed class SteamLaunch
             foreach (var c in plan.Changes)
             {
                 if (!Equal(ReadBytes(c.Path), c.Before)) throw new InvalidOperationException("写入前文件发生变化：" + c.Path);
-                Atomic(c.Path, c.After); written.Add(c);
+                if (c.Before is null && c.After is { Length: 0 } && c.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(c.Path)!);
+                    using var placeholder = new FileStream(c.Path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                }
+                else Atomic(c.Path, c.After);
+                written.Add(c);
             }
         }
         catch (Exception error)
@@ -649,7 +655,7 @@ internal sealed class SteamLaunchPage : Grid
     private readonly StackPanel page = new() { Spacing = 20, Margin = new Thickness(24) };
     private readonly StackPanel form = new() { Spacing = 12 };
     private readonly ContentControl formHost = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch };
-    private readonly InfoBar notice = new() { IsClosable = true };
+    private readonly InfoBar notice = new() { IsClosable = true, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(24) };
     private readonly TextBlock title = new() { Text = "Steam 启动国服", Style = (Style)Application.Current.Resources["PageTitleStyle"] };
     private readonly ComboBox accounts = new() { HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 120 };
     private readonly ComboBox libraries = new() { HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 120 };
@@ -673,12 +679,14 @@ internal sealed class SteamLaunchPage : Grid
         var heading = new Grid { ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         heading.Children.Add(title); Grid.SetColumn(back, 1); heading.Children.Add(back);
-        page.Children.Add(heading); page.Children.Add(notice);
+        page.Children.Add(heading);
+        // Overlay the viewport: opening or closing a notice must never move form controls.
+        Children.Add(notice);
         var tileContent = new StackPanel { Spacing = 12, Width = 150, HorizontalAlignment = HorizontalAlignment.Center };
         tileContent.Children.Add(icon); tileContent.Children.Add(new TextBlock { Text = SteamLaunch.GameName, TextAlignment = TextAlignment.Center });
         tile.Child = tileContent; games.Items.Add(tile); page.Children.Add(games);
         form.Visibility = Visibility.Collapsed; formHost.Content = form; page.Children.Add(formHost);
-        games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await CheckVersion(); };
+        games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await DetectMissingPaths(); await CheckVersion(); };
         back.Click += (_, _) => { games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed; title.Text = "Steam 启动国服"; Refresh(); };
         accounts.ItemsSource = service.Accounts; accounts.SelectedItem = service.Accounts.FirstOrDefault(a => a.Id == service.Config.Account);
         var libraryLabels = new List<PathLabel>();
@@ -711,6 +719,21 @@ internal sealed class SteamLaunchPage : Grid
         initialized = true; Refresh();
         Loaded += (_, _) => { Pull(); Refresh(); }; // Resolve the launch command against this Windows user's current AppData path.
     }
+    private async Task DetectMissingPaths() => await Run(async () =>
+    {
+        var messages = new List<string>();
+        foreach (var item in new[] { (Field: launcher, Launcher: true), (Field: game, Launcher: false) })
+        {
+            if (!string.IsNullOrWhiteSpace(item.Field.Text)) continue;
+            string hint = launcher.Text;
+            var found = await Task.Run(() => SteamLaunch.Detect(item.Launcher, hint));
+            string name = item.Launcher ? "官方启动器" : "国服游戏目录";
+            if (found.Count == 1) item.Field.Text = found[0];
+            else messages.Add(found.Count == 0 ? $"未找到{name}，请浏览选择。" : $"找到多个{name}，请点击自动识别选择。");
+        }
+        Pull();
+        if (messages.Count > 0) ShowNotice(string.Join("\n", messages), true);
+    });
     private void Pull()
     {
         service.Config.Account = (accounts.SelectedItem as SteamLaunch.Account)?.Id ?? "";
@@ -749,7 +772,7 @@ internal sealed class SteamLaunchPage : Grid
         var cause = error.GetBaseException();
         return string.IsNullOrWhiteSpace(cause.Message) ? $"{cause.GetType().Name}（0x{cause.HResult:X8}）：操作失败。" : cause.Message;
     }
-    private async Task CheckVersion() => await Run(async () => { Pull(); Refresh(); if (File.Exists(service.AcfPath)) await service.Fetch(false); });
+    private async Task CheckVersion() { Pull(); Refresh(); if (File.Exists(service.AcfPath)) await Run(() => service.Fetch(false)); }
     private async Task Run(Func<Task> operation)
     {
         if (busy) return;
