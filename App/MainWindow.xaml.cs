@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.2.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.3", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -76,11 +76,21 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += (_, _) => { session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize(); };
     }
+    private void NavigationInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItemContainer is NavigationViewItem { Tag: string key } && pages.TryGetValue(key, out var page)) ResetPage(page);
+    }
+    private static void ResetPage(FrameworkElement page)
+    {
+        if (page is LaunchPage launch) launch.ShowQueue();
+        else if (page is SteamLaunchPage steam) steam.ShowGames();
+    }
     private void Navigate(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is not NavigationViewItem { Tag: string key } || !routes.TryGetValue(key, out var factory)) return;
         activeRoute = key;
         if (!pages.TryGetValue(key, out var page)) pages[key] = page = factory();
+        ResetPage(page);
         PageHost.Content = page;
         PageHost.ContentTransitions = new TransitionCollection { new EntranceThemeTransition() };
         if (session is not null) { session.SetManaging(key == "launch" && launchPage?.IsLibrary == true); CancelCountdown(); }

@@ -1,4 +1,4 @@
-using AstralStation.Services;
+﻿using AstralStation.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -20,6 +20,7 @@ public sealed partial class LaunchPage : UserControl
     private readonly HistoryView history;
     private bool ready, commandBusy;
     private IDisposable? reorderScope;
+    public void ShowQueue() => Tabs.SelectedIndex = 0;
     public bool IsQueue => Tabs.SelectedIndex == 0;
     public bool IsLibrary => Tabs.SelectedIndex == 1;
     public event Action? SectionChanged;

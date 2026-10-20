@@ -687,7 +687,7 @@ internal sealed class SteamLaunchPage : Grid
         tile.Child = tileContent; games.Items.Add(tile); page.Children.Add(games);
         form.Visibility = Visibility.Collapsed; formHost.Content = form; page.Children.Add(formHost);
         games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await DetectMissingPaths(); await CheckVersion(); };
-        back.Click += (_, _) => { games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed; title.Text = "Steam 启动国服"; Refresh(); };
+        back.Click += (_, _) => ShowGames();
         accounts.ItemsSource = service.Accounts; accounts.SelectedItem = service.Accounts.FirstOrDefault(a => a.Id == service.Config.Account);
         var libraryLabels = new List<PathLabel>();
         foreach (string path in service.Libraries) { var label = new PathLabel { Text = path, FontSize = 15, Width = 260 }; libraryLabels.Add(label); libraries.Items.Add(new ComboBoxItem { Tag = path, Content = label }); }
@@ -703,7 +703,7 @@ internal sealed class SteamLaunchPage : Grid
         executable.Children.Add(Row("游戏 EXE 文件", FieldActions(exe, Button("打开所在目录", () => OpenFolder(service.ExePath)))));
         executable.Children.Add(Row(exeState, Buttons(Guarded("生成", "exe", () => Change("exe")))));
         var manifest = Card("3 · ACF 安装清单");
-        manifest.Children.Add(Row("ACF 安装清单", FieldActions(acf, Button("查看内容", ViewAcf))));
+        manifest.Children.Add(Row("ACF 安装清单", FieldActions(acf, Button("查看内容", ViewAcf), Button("打开所在目录", () => OpenFolder(service.AcfPath)))));
         applyAcf.Click += async (_, _) => await Run(() => Change("acf")); guarded.Add((applyAcf, "acf"));
         manifest.Children.Add(Row(acfState, Buttons(Guarded("获取最新数据并生成", "generate", async () => { Pull(); await service.Fetch(); ShowNotice("已生成 ACF 待应用内容，尚未修改 Steam 文件。", false); }), applyAcf)));
         var scripting = Card("4 · 启动脚本");
@@ -718,6 +718,11 @@ internal sealed class SteamLaunchPage : Grid
         libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); await CheckVersion(); } };
         initialized = true; Refresh();
         Loaded += (_, _) => { Pull(); Refresh(); }; // Resolve the launch command against this Windows user's current AppData path.
+    }
+    public void ShowGames()
+    {
+        games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed;
+        title.Text = "Steam 启动国服"; notice.IsOpen = false; Refresh();
     }
     private async Task DetectMissingPaths() => await Run(async () =>
     {
@@ -848,14 +853,42 @@ internal sealed class SteamLaunchPage : Grid
         if (directory is null) throw new InvalidOperationException("找不到目标目录。");
         Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true }); return Task.CompletedTask;
     }
+    private static ScrollViewer CodeView(string text)
+    {
+        var code = new TextBlock { Text = text.Replace("\r\n", "\n").Replace('\r', '\n'), IsTextSelectionEnabled = true,
+            TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 13, Margin = new Thickness(10) };
+        return new ScrollViewer { Content = code, Height = 280, HorizontalScrollMode = ScrollMode.Enabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    }
     private async Task ViewAcf()
     {
-        var content = new StackPanel { Spacing = 12 };
-        void Add(string label, string text) { content.Children.Add(new TextBlock { Text = label }); content.Children.Add(new TextBox { Text = text, IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 13, Height = 230, MinWidth = 440 }); }
+        var content = new StackPanel { Spacing = 12, Width = Math.Max(260, Math.Min(760, ActualWidth - 100)) };
+        void Add(string label, string text) { content.Children.Add(new TextBlock { Text = label }); content.Children.Add(CodeView(text)); }
         if (File.Exists(service.AcfPath)) Add("当前文件", File.ReadAllText(service.AcfPath));
         if (service.Draft is not null) Add("待应用内容", service.Draft);
         if (content.Children.Count == 0) throw new InvalidOperationException("当前没有 ACF，请先获取最新数据并生成。");
-        await dialogs.Show(new ContentDialog { Title = "ACF 安装清单", Content = new ScrollViewer { Content = content }, CloseButtonText = "关闭" });
+        var dialog = new ContentDialog { Title = "ACF 安装清单", Content = new ScrollViewer { Content = content }, CloseButtonText = "关闭" };
+        dialog.Resources["ContentDialogMaxWidth"] = 900d;
+        await dialogs.Show(dialog);
+    }
+    private FrameworkElement Preview(SteamLaunch.Plan plan)
+    {
+        var content = new StackPanel { Spacing = 12, Width = Math.Max(280, Math.Min(940, ActualWidth - 100)) };
+        foreach (var change in plan.Changes.Where(c => !SteamLaunch.Equal(c.Before, c.After)))
+        {
+            content.Children.Add(new TextBlock { Text = change.Description + "\n" + change.Path, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+            var pair = new Grid { ColumnSpacing = 12 };
+            pair.ColumnDefinitions.Add(new ColumnDefinition()); pair.ColumnDefinitions.Add(new ColumnDefinition());
+            void Side(int column, string label, byte[]? bytes)
+            {
+                var panel = new StackPanel { Spacing = 6 };
+                panel.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+                string text = bytes is null ? "（文件不存在）" : bytes.Length == 0 ? "（零字节空文件）" : Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
+                panel.Children.Add(CodeView(text)); Grid.SetColumn(panel, column); pair.Children.Add(panel);
+            }
+            Side(0, "变更前", change.Before); Side(1, "变更后", change.After); content.Children.Add(pair);
+        }
+        return content;
     }
     private async Task Change(string action, string? edited = null)
     {
@@ -864,8 +897,9 @@ internal sealed class SteamLaunchPage : Grid
         if (action == "exe" && service.Latest is null) await service.Fetch(false);
         var plan = service.Prepare(action, edited);
         if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return; }
-        var text = new TextBlock { Text = plan.Description, TextWrapping = TextWrapping.Wrap, MaxWidth = 580, IsTextSelectionEnabled = true };
+        var text = Preview(plan);
         var dialog = new ContentDialog { Title = action == "remove" ? "移除配置 · 变更预览" : "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = action == "remove" ? "确认移除" : "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        dialog.Resources["ContentDialogMaxWidth"] = 1080d;
         if (await dialogs.Show(dialog) != ContentDialogResult.Primary) return;
         await Task.Run(() => service.Apply(plan));
         ShowNotice(action == "remove" ? "配置已移除，原有文件和启动选项已恢复。" : "配置已应用。", false);
