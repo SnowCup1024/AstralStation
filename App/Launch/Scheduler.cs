@@ -11,11 +11,13 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
         public LaunchTask Task = task.Clone();
         public double Deadline = deadline;
         public bool Running, Recorded, Ended;
+        // Only launches issued by this instance may minimize or focus windows; never inherit this on handoff.
+        public bool LaunchedHere;
         public DateTime? LaunchedAt;
         public string ClearedCycle = "", RecordId = "", RecordDate = "";
         public long Serial;
     }
-    public sealed record RunEvent(long Serial, LaunchTask Task, bool Started);
+    public sealed record RunEvent(long Serial, LaunchTask Task, bool Started, bool LaunchedHere);
     private readonly Dictionary<string, string> attempted = [];
     private readonly Dictionary<string, Run> manual = [];
     private readonly List<Run> detached = [];
@@ -74,21 +76,21 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
         if (run.LaunchedAt is DateTime launched && !run.Recorded) { run.RecordDate = run.Task.Cycle(launched); run.RecordId = store.RecordLaunch(run.Task, launched); run.Recorded = true; }
         var task = detachedRun ? null : Current(run);
         if (task is not null && run.ClearedCycle != task.Cycle(now) && (!run.Running || !store.Done(task, now))) { store.Mark(task, now); store.Log("检测到进程：" + task.Name); }
-        if (!run.Running) { run.Serial = ++serial; events.Add(new(run.Serial, run.Task, true)); }
+        if (!run.Running) { run.Serial = ++serial; events.Add(new(run.Serial, run.Task, true, run.LaunchedHere)); }
         run.Running = true;
     }
     private void Finished(Run run, DateTime now)
     {
         if (run.Ended) return;
         if (run.Recorded) store.Finish(run.RecordDate, run.RecordId, now);
-        events.Add(new(run.Serial, run.Task, false)); run.Ended = true;
+        events.Add(new(run.Serial, run.Task, false, run.LaunchedHere)); run.Ended = true;
     }
     private void Completed(Run run, DateTime now) { if (Current(run) is { } task) attempted[task.Id] = task.Cycle(now); }
     private void Suppress(Run run) { if (Current(run) is { } task) { run.ClearedCycle = task.Cycle(DateTime.Now); attempted[task.Id] = run.ClearedCycle; } }
     private void Launch(Run run)
     {
         Launching = true;
-        try { var started = DateTime.Now; processes.Launch(run.Task); run.LaunchedAt = started; run.Deadline = Seconds + run.Task.TimeoutSeconds; }
+        try { var started = DateTime.Now; processes.Launch(run.Task); run.LaunchedHere = true; run.LaunchedAt = started; run.Deadline = Seconds + run.Task.TimeoutSeconds; }
         finally { Launching = false; }
     }
     public List<RunEvent> TakeEvents() { var result = events.ToList(); events.Clear(); return result; }
