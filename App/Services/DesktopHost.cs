@@ -129,7 +129,7 @@ public sealed class DesktopHost : IDisposable
         catch (Exception ex) { Debug.WriteLine("窗口消息处理失败：" + ex.Message); }
         return DefSubclassProc(hwnd, message, wParam, lParam);
     }
-    private string StartupCommand => Quote(Environment.ProcessPath!) + " --data-dir " + Quote(root);
+    private string StartupCommand => Quote(Environment.ProcessPath!) + " --data-dir " + Quote(root) + " --login-startup";
     public bool LoginEnabled { get { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue(identity) is string command && !string.IsNullOrWhiteSpace(command); } }
     // The registration belongs to the data directory, not to a versioned EXE path.
     // Only retarget an existing registration; a deleted/disabled entry stays disabled.

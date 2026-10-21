@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Windowing;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -18,19 +18,20 @@ public sealed partial class MainWindow : Window
     private readonly Dialogs dialogs;
     private LaunchPage? launchPage;
     private string activeRoute = "launch";
-    private bool forceExit, closed, keepOpen, restoreAfterRuns;
+    private bool forceExit, closed, keepOpen, restoreAfterRuns, completionEligible;
     private double? closeDeadline;
     private ContentDialog? completionDialog;
     private TextBlock? countdownText;
     private IDisposable? trayScope;
     private readonly Dictionary<long, FocusRequest> running = [];
     private sealed class FocusRequest(LaunchTask task) { public LaunchTask Task = task; public bool Minimized, Attempted; public double Deadline; }
-    public MainWindow(string dataRoot, bool paused, bool background)
+    public MainWindow(string dataRoot, bool paused, bool background, bool loginStartup)
     {
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         session = new(dataRoot, paused, DispatcherQueue);
+        completionEligible = loginStartup || session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now));
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBar);
         double scale = DesktopHost.GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96d;
@@ -42,7 +43,7 @@ public sealed partial class MainWindow : Window
         dialogs = new(this, Root, session);
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
-        routes["launch"] = () => { launchPage = new(session, dialogs, desktop); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
+        routes["launch"] = () => { launchPage = new(session, dialogs); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
         routes["steam"] = () =>
         {
             var args = Environment.GetCommandLineArgs();
@@ -52,12 +53,12 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.5", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.6", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
-        session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
+        session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
         desktop.RestoreRequested += Restore;
-        desktop.UserRestored += () => { foreach (var request in running.Values) request.Attempted = true; };
+        desktop.UserRestored += () => { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) { keepOpen = true; CancelCountdown(); } };
         desktop.PauseRequested += session.TogglePause;
         desktop.ExitRequested += RequestExit;
         desktop.UpgradeRequested += () =>
@@ -76,6 +77,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += async (_, _) =>
         {
+            try { desktop.RefreshLoginTarget(); } catch (Exception ex) { session.Store.Fail(ex.Message); }
             session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize();
             if (!pages.TryGetValue("steam", out var steam)) pages["steam"] = steam = routes["steam"]();
             if (steam is SteamLaunchPage setup) await setup.ScanOnce();
@@ -116,15 +118,71 @@ public sealed partial class MainWindow : Window
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
         ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);
+        var launch = new StackPanel { Spacing = 12 };
+        launch.Children.Add(new TextBlock { Text = "启动管理", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
+        var autoClose = new ComboBox { ItemsSource = new[] { "保持打开", "倒计时 15 秒后退出" }, Width = 220 };
+        var tray = new ComboBox { ItemsSource = new[] { "关闭", "最小化时收入托盘" }, Width = 220 };
+        var closeToTray = new ComboBox { ItemsSource = new[] { "直接退出", "最小化" }, Width = 220 };
+        var login = new ComboBox { ItemsSource = new[] { "关闭", "开启" }, Width = 220 };
+        bool ready = false;
+        void Sync()
+        {
+            ready = false;
+            autoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0;
+            tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0;
+            closeToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0;
+            closeToTray.IsEnabled = session.Store.Settings.Tray;
+            login.SelectedIndex = desktop.LoginEnabled ? 1 : 0;
+            ready = true;
+        }
+        void Row(string label, FrameworkElement control)
+        {
+            var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(0, 6, 0, 6) };
+            row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(control, label);
+            Grid.SetColumn(control, 1); row.Children.Add(control); launch.Children.Add(row);
+        }
+        Row("全部任务完成并退出后", autoClose);
+        launch.Children.Add(new TextBlock { Text = "本次任务全部完成并退出后，或 Windows 登录启动时任务已全部完成，才会倒计时。任务已完成时手动打开将保持打开。仅停留在今日队列时生效，记录保存失败或仍有运行任务时不会退出。", FontSize = 13 });
+        Row("允许托盘后台运行", tray); Row("关闭窗口时", closeToTray); Row("Windows 登录时启动", login);
+        async void Save(object sender, SelectionChangedEventArgs args)
+        {
+            if (!ready) return;
+            var old = session.Store.Settings; var next = old.Clone();
+            next.AutoClose = autoClose.SelectedIndex == 1; next.Tray = tray.SelectedIndex == 1; next.CloseToTray = next.Tray && closeToTray.SelectedIndex == 1;
+            try { desktop.SetTray(next.Tray); session.Store.SaveSettings(next); }
+            catch (Exception ex) { desktop.SetTray(old.Tray); await dialogs.Error(ex.Message); }
+            finally { Sync(); session.Notify(); }
+        }
+        autoClose.SelectionChanged += Save; tray.SelectionChanged += Save; closeToTray.SelectionChanged += Save;
+        login.SelectionChanged += async (_, _) =>
+        {
+            if (!ready) return;
+            try { desktop.SetLogin(login.SelectedIndex == 1); }
+            catch (Exception ex) { await dialogs.Error(ex.Message); }
+            finally { Sync(); }
+        };
+        Sync();
+        panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = launch });
+        var data = new StackPanel { Spacing = 12 };
+        data.Children.Add(new TextBlock { Text = "本地数据", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
+        data.Children.Add(new TextBlock { Text = session.Store.Root, IsTextSelectionEnabled = true });
+        var openData = new Button { Content = "打开数据目录" };
+        openData.Click += async (_, _) => { try { DesktopHost.OpenFolder(session.Store.Root); } catch (Exception ex) { await dialogs.Error(ex.Message); } };
+        data.Children.Add(openData);
+        data.Children.Add(new TextBlock { Text = "任务、状态和历史以 JSON 保存，并保留 .bak 备份。退出应用不会关闭游戏。", FontSize = 13 });
+        panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = data });
         return new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
-    private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) closeDeadline = Scheduler.Seconds + 15; desktop.Restore(); }
+    private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (session.Scheduler.AllDone) { keepOpen = true; CancelCountdown(); } desktop.Restore(); }
     private void RequestExit() { if (session.Interacting || session.Scheduler.Launching) { Restore(); return; } forceExit = true; completionDialog?.Hide(); Close(); }
     private void CancelCountdown() { closeDeadline = null; completionDialog?.Hide(); }
-    private bool CanClose => session.Store.Settings.AutoClose && !keepOpen && activeRoute == "launch" && launchPage?.IsQueue == true && session.Scheduler.AllDone && !session.Interacting && session.Store.Error is null;
+    private bool CanClose => completionEligible && session.Store.Settings.AutoClose && !keepOpen && activeRoute == "launch" && launchPage?.IsQueue == true && session.Scheduler.AllDone && !session.Interacting && session.Store.Error is null;
     private void UpdateLifecycle()
     {
         if (closed) return;
+        if (session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now))) completionEligible = true;
         if (session.Interacting || session.Store.Error is not null) { CancelCountdown(); return; }
         if (running.Count == 0 && restoreAfterRuns && !CanClose) { restoreAfterRuns = false; desktop.Restore(); }
         foreach (var request in running.Values)

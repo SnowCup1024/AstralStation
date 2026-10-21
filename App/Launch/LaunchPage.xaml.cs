@@ -1,4 +1,4 @@
-﻿using AstralStation.Services;
+using AstralStation.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -15,7 +15,6 @@ public sealed partial class LaunchPage : UserControl
 {
     private readonly LaunchSession session;
     private readonly Dialogs dialogs;
-    private readonly DesktopHost desktop;
     private readonly ObservableCollection<LaunchTask> library = [];
     private readonly HistoryView history;
     private bool ready, commandBusy;
@@ -24,17 +23,15 @@ public sealed partial class LaunchPage : UserControl
     public bool IsQueue => Tabs.SelectedIndex == 0;
     public bool IsLibrary => Tabs.SelectedIndex == 1;
     public event Action? SectionChanged;
-    public LaunchPage(LaunchSession session, Dialogs dialogs, DesktopHost desktop)
+    public LaunchPage(LaunchSession session, Dialogs dialogs)
     {
-        this.session = session; this.dialogs = dialogs; this.desktop = desktop;
+        this.session = session; this.dialogs = dialogs;
         InitializeComponent(); history = new(session, dialogs); CalendarHost.Content = history;
         RingLabel.Foreground = RingValue.Foreground = RingTask.Foreground = Progress.ProgressBrush;
         LibraryList.ItemsSource = library;
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
         session.Changed += Refresh; session.TasksChanged += Reload;
-        AutoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0; Tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0; CloseToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0; CloseToTray.IsEnabled = (Tray.SelectedIndex == 1);
-        try { desktop.RefreshLoginTarget(); Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; } catch (Exception ex) { ErrorBar.Message = ex.Message; ErrorBar.IsOpen = true; }
-        DataPath.Text = session.Store.Root; ready = true; Reload();
+        ready = true; Reload();
     }
     private void Reload()
     {
@@ -174,18 +171,4 @@ public sealed partial class LaunchPage : UserControl
         try { var files = await e.DataView.GetStorageItemsAsync(); await Guard(async () => { foreach (var file in files.OfType<StorageFile>().Where(f => new[] { ".exe", ".lnk", ".bat", ".cmd", ".ps1" }.Contains(f.FileType.ToLowerInvariant())).Take(16)) await Edit(null, path: file.Path); }); }
         catch (Exception ex) { await dialogs.Error(ex.Message); } finally { deferral.Complete(); }
     }
-    private async void SettingsChanged(object sender, RoutedEventArgs e)
-    {
-        if (!ready) return;
-        await Guard(() =>
-        {
-            var old = session.Store.Settings; var next = old.Clone(); next.AutoClose = (AutoClose.SelectedIndex == 1); next.Tray = (Tray.SelectedIndex == 1); next.CloseToTray = next.Tray && (CloseToTray.SelectedIndex == 1);
-            try { desktop.SetTray(next.Tray); session.Store.SaveSettings(next); }
-            catch { desktop.SetTray(old.Tray); throw; }
-            finally { ready = false; AutoClose.SelectedIndex = session.Store.Settings.AutoClose ? 1 : 0; Tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0; CloseToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0; CloseToTray.IsEnabled = (Tray.SelectedIndex == 1); ready = true; }
-            return Task.CompletedTask;
-        });
-    }
-    private async void LoginChanged(object sender, RoutedEventArgs e) { if (ready) await Guard(() => { try { desktop.SetLogin((Login.SelectedIndex == 1)); } finally { ready = false; Login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; ready = true; } return Task.CompletedTask; }); }
-    private async void OpenData(object sender, RoutedEventArgs e) => await Guard(() => { DesktopHost.OpenFolder(session.Store.Root); return Task.CompletedTask; });
 }

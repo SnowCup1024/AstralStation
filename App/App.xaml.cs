@@ -39,7 +39,7 @@ public partial class App : Application
                 Thread.Sleep(150);
             }
         }
-        window = new MainWindow(root, arguments.Contains("--paused"), arguments.Contains("--background"));
+        window = new MainWindow(root, arguments.Contains("--paused"), arguments.Contains("--background"), arguments.Contains("--login-startup"));
         window.Closed += (_, _) => { mutex.ReleaseMutex(); mutex.Dispose(); };
         window.Activate();
     }
