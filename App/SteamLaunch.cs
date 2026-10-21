@@ -123,8 +123,7 @@ internal sealed class SteamLaunch
         if (current.Length >= 2 && current[1] == ':') current = char.ToUpperInvariant(current[0]) + current[1..];
         foreach (string part in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
-            string? actual = Directory.Exists(current) ? Directory.EnumerateFileSystemEntries(current)
-                .FirstOrDefault(p => Path.GetFileName(p).Equals(part, StringComparison.OrdinalIgnoreCase)) : null;
+            string? actual = Directory.Exists(current) ? Directory.EnumerateFileSystemEntries(current, part, new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive, AttributesToSkip = 0 }).FirstOrDefault() : null;
             current = actual ?? Path.Combine(current, part);
         }
         return current;
@@ -260,6 +259,18 @@ internal sealed class SteamLaunch
         if (!Path.GetFileName(Config.Launcher).Equals("Launcher.exe", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("请选择鹰角官方启动器 Launcher.exe。");
         if (Config.GameDirectory.Split('\\', '/').Contains("steamapps", StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("请选择国服游戏目录，不能使用 Steam 游戏目录。");
         if (Config.Arguments.Any(c => c is '\r' or '\n' or '\0') || Config.ExitGraceSeconds is < 2 or > 60) throw new InvalidOperationException("脚本参数无效；退出等待应为 2–60 秒。");
+    }
+    internal SteamLaunch Snapshot()
+    {
+        var copy = (SteamLaunch)MemberwiseClone();
+        copy.Config = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(Config, Json), Json)!;
+        return copy;
+    }
+    internal void UseVersion(SteamLaunch snapshot)
+    {
+        if (snapshot.Latest is null) return;
+        if (Latest is not null && Latest.Build != snapshot.Latest.Build) { Draft = null; draftLibrary = null; }
+        Latest = snapshot.Latest;
     }
     public string? CurrentOptions() => new Kv(File.ReadAllText(LocalConfigPath)).Find(OptionKeys)?.Value;
     private Receipt ReadReceipt()
@@ -477,7 +488,7 @@ internal sealed class SteamLaunch
         private int position;
         private readonly List<Node> nodes;
         public Kv(string text) { this.text = text; nodes = Parse(false, 0); }
-        private void White() { while (position < text.Length) { if (char.IsWhiteSpace(text[position]) || text[position] == '\uFEFF') { position++; continue; } if (text[position..].StartsWith("//")) { while (position < text.Length && text[position] != '\n') position++; continue; } break; } }
+        private void White() { while (position < text.Length) { if (char.IsWhiteSpace(text[position]) || text[position] == '\uFEFF') { position++; continue; } if (text.AsSpan(position).StartsWith("//")) { while (position < text.Length && text[position] != '\n') position++; continue; } break; } }
         private string Token()
         {
             White(); if (position >= text.Length) throw new FormatException("VDF 内容不完整。");
@@ -643,7 +654,8 @@ try {
 #if !STEAM_TEST
 internal sealed class SteamLaunchPage : Grid
 {
-    private readonly SteamLaunch service;
+    private SteamLaunch service = null!;
+    private readonly Task initialization;
     private readonly Dialogs dialogs;
     private readonly StackPanel page = new() { Spacing = 20, Margin = new Thickness(24) };
     private readonly StackPanel form = new() { Spacing = 12 };
@@ -655,7 +667,7 @@ internal sealed class SteamLaunchPage : Grid
     private readonly PathLabel launcher = PathDisplay(), game = PathDisplay(), exe = PathDisplay(), acf = PathDisplay(), script = PathDisplay();
     private readonly TextBox options = ReadOnly();
     private readonly TextBlock exeState = new(), acfState = new();
-    private readonly Button applyAcf = new() { Content = "应用" };
+    private readonly Button applyAcf = new() { Content = "应用", IsEnabled = false };
     private readonly Border tile = new() { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(2), Padding = new Thickness(20) };
     private readonly GameIcon icon = new() { Width = 52, Height = 52 };
     private readonly Button back = new() { Content = "返回", Visibility = Visibility.Collapsed };
@@ -667,7 +679,12 @@ internal sealed class SteamLaunchPage : Grid
     public SteamLaunchPage(Dialogs dialogs, string? testData = null, string? testSteam = null)
     {
         this.dialogs = dialogs;
-        service = new(testData, testSteam);
+        initialization = Initialize(testData, testSteam);
+    }
+    private async Task Initialize(string? testData, string? testSteam)
+    {
+        try { service = await Task.Run(() => new SteamLaunch(testData, testSteam)); }
+        catch (Exception ex) { Children.Add(notice); ShowNotice(ErrorMessage(ex), true); return; }
         Children.Add(new ScrollViewer { Content = page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         var heading = new Grid { ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -708,19 +725,21 @@ internal sealed class SteamLaunchPage : Grid
         var complete = Card("整套配置");
         complete.Children.Add(Row("填写账号与国服路径后，可按顺序一键应用。", Buttons(Button("一键移除配置", () => Change("remove")), Guarded("一键应用配置", "all", () => Change("all")))));
         accounts.SelectionChanged += (_, _) => { if (initialized && !busy) { Pull(); Refresh(); } };
-        libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); await CheckVersion(); } };
-        initialized = true; Refresh();
-        Loaded += (_, _) => { Pull(); Refresh(); }; // Resolve the launch command against this Windows user's current AppData path.
+        libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); Refresh(); await CheckVersion(); } };
+        initialized = true; Pull(); Refresh();
+
     }
     public void ShowGames()
     {
         games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed;
-        title.Text = "Steam 启动国服"; notice.IsOpen = false; Refresh();
+        title.Text = "Steam 启动国服"; notice.IsOpen = false;
     }
     private Task? startupScan;
     public Task ScanOnce() => startupScan ??= ScanPaths();
     private async Task ScanPaths()
     {
+        await initialization;
+        if (!initialized) return;
         foreach (var item in new[] { (Field: launcher, Launcher: true), (Field: game, Launcher: false) })
         {
             if (!string.IsNullOrWhiteSpace(item.Field.Text)) continue;
@@ -739,27 +758,55 @@ internal sealed class SteamLaunchPage : Grid
     {
         service.Config.Account = (accounts.SelectedItem as SteamLaunch.Account)?.Id ?? "";
         service.Config.Library = (libraries.SelectedItem as ComboBoxItem)?.Tag as string ?? service.Config.Library;
-        service.Config.Launcher = SteamLaunch.CanonicalPath(launcher.Text.Trim().Trim('"')); service.Config.GameDirectory = SteamLaunch.CanonicalPath(game.Text.Trim().Trim('"'));
+        service.Config.Launcher = launcher.Text.Trim().Trim('"'); service.Config.GameDirectory = game.Text.Trim().Trim('"');
         launcher.Text = service.Config.Launcher; game.Text = service.Config.GameDirectory;
+        string path = string.IsNullOrWhiteSpace(service.Config.GameDirectory) ? "" : Path.Combine(service.Config.GameDirectory, "Endfield.exe");
+        if (icon.Path != path) icon.Path = path;
     }
+    private int refreshRevision;
+    private bool refreshing;
     private void Refresh()
     {
-        foreach (var item in guarded)
-        {
-            string? reason = service.BlockReason(item.Action);
-            item.Button.IsEnabled = reason is null; ToolTipService.SetToolTip(item.Button, reason);
-        }
+        refreshRevision++;
+        if (initialized && !refreshing) _ = RefreshAsync();
+    }
+    private async Task RefreshAsync()
+    {
+        refreshing = true;
         try
         {
-            exe.Text = service.ExePath; acf.Text = service.AcfPath; script.Text = service.ScriptPath; options.Text = service.LaunchOptions;
-            exeState.Text = !File.Exists(service.ExePath) ? "当前不存在" : new FileInfo(service.ExePath).Length == 0 ? "当前已存在" : "存在非空文件，已拒绝生成和应用。";
-            exeState.Foreground = new SolidColorBrush(exeState.Text.StartsWith("存在非空") ? Microsoft.UI.Colors.Firebrick : ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
-            acfState.Text = service.AcfStatus(service.Latest is not null);
-            applyAcf.Content = File.Exists(service.AcfPath) ? "更新" : "应用";
-            tile.BorderBrush = new SolidColorBrush(service.Configured() ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
-            icon.Path = string.IsNullOrWhiteSpace(service.Config.GameDirectory) ? "" : Path.Combine(service.Config.GameDirectory, "Endfield.exe");
+            int revision;
+            do
+            {
+                revision = refreshRevision;
+                var snapshot = service.Snapshot();
+                var actions = guarded.Select(g => g.Action).ToArray();
+                try
+                {
+                    var view = await Task.Run(() =>
+                    {
+                        var reasons = actions.Select(snapshot.BlockReason).ToArray();
+                        string target = snapshot.ExePath, manifest = snapshot.AcfPath;
+                        string state = !File.Exists(target) ? "当前不存在" : new FileInfo(target).Length == 0 ? "当前已存在" : "存在非空文件，已拒绝生成和应用。";
+                        return (Reasons: reasons, Exe: target, Acf: manifest, ExeState: state,
+                            AcfState: snapshot.AcfStatus(snapshot.Latest is not null), Exists: File.Exists(manifest), Configured: snapshot.Configured());
+                    });
+                    if (revision != refreshRevision) continue;
+                    for (int i = 0; i < guarded.Count; i++)
+                    {
+                        guarded[i].Button.IsEnabled = view.Reasons[i] is null;
+                        ToolTipService.SetToolTip(guarded[i].Button, view.Reasons[i]);
+                    }
+                    exe.Text = view.Exe; acf.Text = view.Acf; script.Text = service.ScriptPath; options.Text = service.LaunchOptions;
+                    exeState.Text = view.ExeState;
+                    exeState.Foreground = new SolidColorBrush(view.ExeState.StartsWith("存在非空") ? Microsoft.UI.Colors.Firebrick : ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
+                    acfState.Text = view.AcfState; applyAcf.Content = view.Exists ? "更新" : "应用";
+                    tile.BorderBrush = new SolidColorBrush(view.Configured ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
+                }
+                catch (Exception ex) { if (revision == refreshRevision) ShowNotice(ErrorMessage(ex), true); }
+            } while (revision != refreshRevision);
         }
-        catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
+        finally { refreshing = false; }
     }
     private void ShowNotice(string message, bool error)
     {
@@ -773,10 +820,35 @@ internal sealed class SteamLaunchPage : Grid
         var cause = error.GetBaseException();
         return string.IsNullOrWhiteSpace(cause.Message) ? $"{cause.GetType().Name}（0x{cause.HResult:X8}）：操作失败。" : cause.Message;
     }
-    private async Task CheckVersion() { Pull(); Refresh(); if (File.Exists(service.AcfPath)) await Run(() => service.Fetch(false)); }
+    private int operationRevision;
+    private readonly Dictionary<string, Task> versionChecks = new(StringComparer.OrdinalIgnoreCase);
+    private Task CheckVersion()
+    {
+        Pull();
+        string library = service.Config.Library;
+        if (versionChecks.TryGetValue(library, out var pending)) return pending;
+        var work = ReadVersion(service.Snapshot(), library);
+        versionChecks[library] = work;
+        return work;
+    }
+    private async Task ReadVersion(SteamLaunch snapshot, string library)
+    {
+        int revision = operationRevision;
+        try
+        {
+            await Task.Run(async () => { if (File.Exists(snapshot.AcfPath)) await snapshot.Fetch(false); });
+            if (busy || revision != operationRevision || !string.Equals(service.Config.Library, library, StringComparison.OrdinalIgnoreCase)) return;
+            service.UseVersion(snapshot); Refresh();
+        }
+        catch (Exception ex)
+        {
+            if (form.Visibility == Visibility.Visible && !busy && service.Config.Library == library) ShowNotice(ErrorMessage(ex), true);
+        }
+    }
     private async Task Run(Func<Task> operation)
     {
         if (busy) return;
+        operationRevision++;
         busy = true; formHost.IsEnabled = back.IsEnabled = false; notice.IsOpen = false;
         try { await operation(); }
         catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
@@ -813,7 +885,7 @@ internal sealed class SteamLaunchPage : Grid
     }
     private Grid PathInput(PathLabel field, bool directory)
     {
-        return FieldActions(field, Button("浏览", async () => { string? selected = directory ? await dialogs.PickFolder() : await dialogs.Pick(".exe"); if (selected is not null) field.Text = selected; Pull(); }), Button("自动识别", async () =>
+        return FieldActions(field, Button("浏览", async () => { string? selected = directory ? await dialogs.PickFolder() : await dialogs.Pick(".exe"); if (selected is not null) field.Text = await Task.Run(() => SteamLaunch.CanonicalPath(selected)); Pull(); }), Button("自动识别", async () =>
         {
             string hint = directory ? launcher.Text : field.Text;
             var found = await Task.Run(() => SteamLaunch.Detect(!directory, hint));
@@ -840,7 +912,7 @@ internal sealed class SteamLaunchPage : Grid
     private Button Guarded(string text, string action, Func<Task> operation)
     {
         var button = Button(text, async () => { Pull(); service.Require(action); await operation(); });
-        guarded.Add((button, action)); return button;
+        button.IsEnabled = false; guarded.Add((button, action)); return button;
     }
     private static Task OpenFolder(string path)
     {
