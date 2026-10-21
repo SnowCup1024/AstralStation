@@ -9,6 +9,7 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
     private sealed class Run(LaunchTask task, double deadline)
     {
         public LaunchTask Task = task.Clone();
+        public readonly HashSet<string> ProcessNames = task.ProcessNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
         public double Deadline = deadline;
         public bool Running, Recorded, Ended;
         // Only launches issued by this instance may minimize or focus windows; never inherit this on handoff.
@@ -63,7 +64,7 @@ public sealed class Scheduler(LaunchStore store, WindowsProcessHost processes)
     public bool Managing { get; private set; }
     public static double Seconds => (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
     private static bool Present(LaunchTask task, HashSet<string> names) => task.ProcessNames.Any(names.Contains);
-    private LaunchTask? Current(Run run) => store.Tasks.FirstOrDefault(t => t.Id == run.Task.Id && string.Equals(System.IO.Path.GetFullPath(t.Path), System.IO.Path.GetFullPath(run.Task.Path), StringComparison.OrdinalIgnoreCase) && t.ProcessNames.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(run.Task.ProcessNames));
+    private LaunchTask? Current(Run run) => store.Tasks.FirstOrDefault(t => t.Id == run.Task.Id && string.Equals(System.IO.Path.GetFullPath(t.Path), System.IO.Path.GetFullPath(run.Task.Path), StringComparison.OrdinalIgnoreCase) && run.ProcessNames.SetEquals(t.ProcessNames));
     public void SetPause(bool user, bool management)
     {
         UserPaused = user; Managing = management; bool next = user || management || store.Error is not null;

@@ -93,7 +93,8 @@ public sealed class HistoryView : Grid
         for (int day = 1; day <= days; day++)
         {
             string key = month.AddDays(day - 1).ToString("yyyy-MM-dd");
-            bool hasRecord = available.Contains(key);
+            // HistoryDates returns dates sorted with the same ordinal comparer.
+            bool hasRecord = available.BinarySearch(key, StringComparer.Ordinal) >= 0;
             var button = new ToggleButton { Tag = key, IsChecked = key == selected, Content = day.ToString(), Padding = new(0), Width = 36, Height = 36, MinWidth = 0, MinHeight = 0, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, IsEnabled = hasRecord || key == DateTime.Today.ToString("yyyy-MM-dd"), CornerRadius = new(18), BorderThickness = new(hasRecord ? 1.5 : 0) };
             button.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             // Selected dates keep the same fill and text through hover and press.

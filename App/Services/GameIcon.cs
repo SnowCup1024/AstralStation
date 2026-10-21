@@ -83,11 +83,15 @@ internal static class GameIconLoader
         if (cache.TryGetValue(key, out var cached)) return cached;
         if (!pending.TryGetValue(key, out var work)) pending[key] = work = Read(key);
         var image = await work;
-        if (pending.TryGetValue(key, out var current) && ReferenceEquals(current, work)) pending.Remove(key);
-        if (image is not null)
+        // Only the first waiter publishes the shared result and evicts an old entry.
+        if (pending.TryGetValue(key, out var current) && ReferenceEquals(current, work))
         {
-            if (cache.Count >= 128) cache.Remove(cache.Keys.First());
-            cache[key] = image;
+            pending.Remove(key);
+            if (image is not null)
+            {
+                if (cache.Count >= 128) cache.Remove(cache.Keys.First());
+                cache[key] = image;
+            }
         }
         return image;
     }
