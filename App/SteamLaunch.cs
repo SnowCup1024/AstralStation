@@ -776,16 +776,14 @@ internal sealed class SteamLaunchPage : Grid
         var executable = Card("2 · 空EXE占位文件", "inspect-exe");
         executable.Children.Add(Row("游戏 EXE 文件", FieldActions(exe, Button("打开所在目录", () => OpenFolder(service.ExePath)))));
         exeButtonHost.Child = Guarded("生成空EXE文件", "exe", () => Change("exe"));
-        executable.Children.Add(Row(exeState, Buttons(exeButtonHost)));
+        executable.Children.Add(Row(exeState, Buttons(exeButtonHost), actions: true));
         var manifest = Card("3 · ACF 安装清单", "generate");
         manifest.Children.Add(Row("ACF 安装清单", FieldActions(acf, Button("查看内容", ViewAcf), Button("打开所在目录", () => OpenFolder(service.AcfPath)))));
         applyAcf.Click += async (_, _) => await Run(() => Change("acf")); guarded.Add((applyAcf, "acf"));
-        manifest.Children.Add(Row(acfState, Buttons(Guarded("获取最新数据并生成", "generate", async () => { Pull(); await service.Fetch(); ShowNotice("已生成 ACF 待应用内容，尚未修改 Steam 文件。", false); }), applyAcf)));
+        manifest.Children.Add(Row(acfState, Buttons(Guarded("获取最新数据并生成", "generate", async () => { Pull(); await service.Fetch(); ShowNotice("已生成 ACF 待应用内容，尚未修改 Steam 文件。", false); }), applyAcf), actions: true));
         var launching = Card("4 · Steam 启动选项", "runtime");
         launching.Children.Add(Row("Steam 启动选项", options));
-        launching.Children.Add(Row("复制后在 Steam 游戏属性的启动选项中手动填写。启动脚本会自动生成。", Buttons(Guarded("复制", "runtime", async () => { await Task.Run(() => service.Apply(service.Prepare("runtime"))); Dialogs.Copy(service.LaunchOptions); }))));
-        var complete = Card("整套配置");
-        complete.Children.Add(Row("填写账号与路径后，可按顺序一键应用。", Buttons(Button("一键移除配置", () => Change("remove")), Guarded("一键应用配置", "all", () => Change("all")))));
+        launching.Children.Add(Row("复制后在 Steam 游戏属性的启动选项中手动填写。启动脚本会自动生成。", Buttons(Guarded("复制", "runtime", async () => { await Task.Run(() => service.Apply(service.Prepare("runtime"))); Dialogs.Copy(service.LaunchOptions); })), actions: true));
         accounts.SelectionChanged += (_, _) => { if (initialized && !busy) { Pull(); Refresh(); } };
         libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); Refresh(); await CheckVersion(); } };
         initialized = true; Pull(); Refresh();
@@ -970,12 +968,12 @@ internal sealed class SteamLaunchPage : Grid
         foreach (var b in buttons) panel.Children.Add(b); return panel;
     }
     private static FrameworkElement Right(FrameworkElement control) { control.HorizontalAlignment = HorizontalAlignment.Right; return control; }
-    private static Grid Row(string label, FrameworkElement control) => Row(new TextBlock { Text = label }, control);
-    private static Grid Row(TextBlock label, FrameworkElement control)
+    private static Grid Row(string label, FrameworkElement control, bool actions = false) => Row(new TextBlock { Text = label }, control, actions);
+    private static Grid Row(TextBlock label, FrameworkElement control, bool actions = false)
     {
         var grid = new Grid { ColumnSpacing = 16, MinHeight = 38 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 100 });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.5, GridUnitType.Star), MinWidth = 380 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = actions ? GridLength.Auto : new GridLength(2.5, GridUnitType.Star), MinWidth = actions ? 0 : 380 });
         label.VerticalAlignment = VerticalAlignment.Center; label.TextWrapping = TextWrapping.Wrap;
         control.VerticalAlignment = VerticalAlignment.Center;
         if (control is StackPanel) control.HorizontalAlignment = HorizontalAlignment.Right;
@@ -1078,7 +1076,6 @@ internal sealed class SteamLaunchPage : Grid
     private async Task Change(string action)
     {
         Pull(); service.Require(action);
-        if (action == "all" && service.Draft is null) await service.Fetch(complete: true);
         if (action == "exe" && service.Latest is null) await service.Fetch(false);
         var plan = service.Prepare(action);
         if (action == "exe")
@@ -1088,10 +1085,10 @@ internal sealed class SteamLaunchPage : Grid
         }
         if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return; }
         var text = Preview(plan);
-        var dialog = new ContentDialog { Title = action == "remove" ? "移除配置 · 变更预览" : "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = action == "remove" ? "确认移除" : "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog { Title = "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
         if (await dialogs.Show(dialog, expand: true) != ContentDialogResult.Primary) return;
         await Task.Run(() => service.Apply(plan));
-        ShowNotice(action == "remove" ? "文件配置已移除。Steam 启动选项请手动清除或恢复。" : "文件配置已应用。请复制启动选项并在 Steam 中手动填写。", false);
+        ShowNotice("文件配置已应用。请复制启动选项并在 Steam 中手动填写。", false);
     }
 }
 #endif
