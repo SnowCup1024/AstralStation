@@ -40,6 +40,23 @@ internal sealed class SteamLaunch
     }
     public sealed class Receipt { public List<Owned> Files { get; set; } = []; }
     public sealed record Change(string Path, byte[]? Before, byte[]? After, string Description);
+    internal sealed record ComparedLine(string? Before, string? After, bool Changed);
+    internal static IEnumerable<ComparedLine> CompareLines(string before, string after)
+    {
+        string[] Split(string text) => text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var left = Split(before); var right = Split(after); int i = 0, j = 0;
+        while (i < left.Length || j < right.Length)
+        {
+            if (i < left.Length && j < right.Length && left[i] == right[j]) { yield return new(left[i++], right[j++], false); continue; }
+            int skipLeft = i < left.Length && j < right.Length ? Array.IndexOf(left, right[j], i, Math.Min(64, left.Length - i)) : -1;
+            int skipRight = i < left.Length && j < right.Length ? Array.IndexOf(right, left[i], j, Math.Min(64, right.Length - j)) : -1;
+            if (skipLeft >= 0 && (skipRight < 0 || skipLeft - i <= skipRight - j))
+                while (i < skipLeft) yield return new(left[i++], null, true);
+            else if (skipRight >= 0)
+                while (j < skipRight) yield return new(null, right[j++], true);
+            else yield return new(i < left.Length ? left[i++] : null, j < right.Length ? right[j++] : null, true);
+        }
+    }
     public sealed record Plan(List<Change> Changes, string Description);
     public string Root { get; }
     public string SteamRoot { get; }
@@ -686,7 +703,7 @@ internal sealed class SteamLaunchPage : Grid
         tileContent.Children.Add(icon); tileContent.Children.Add(new TextBlock { Text = SteamLaunch.GameName, TextAlignment = TextAlignment.Center });
         tile.Child = tileContent; games.Items.Add(tile); page.Children.Add(games);
         form.Visibility = Visibility.Collapsed; formHost.Content = form; page.Children.Add(formHost);
-        games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await DetectMissingPaths(); await CheckVersion(); };
+        games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await CheckVersion(); };
         back.Click += (_, _) => ShowGames();
         accounts.ItemsSource = service.Accounts; accounts.SelectedItem = service.Accounts.FirstOrDefault(a => a.Id == service.Config.Account);
         var libraryLabels = new List<PathLabel>();
@@ -724,21 +741,24 @@ internal sealed class SteamLaunchPage : Grid
         games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed;
         title.Text = "Steam 启动国服"; notice.IsOpen = false; Refresh();
     }
-    private async Task DetectMissingPaths() => await Run(async () =>
+    private Task? startupScan;
+    public Task ScanOnce() => startupScan ??= ScanPaths();
+    private async Task ScanPaths()
     {
-        var messages = new List<string>();
         foreach (var item in new[] { (Field: launcher, Launcher: true), (Field: game, Launcher: false) })
         {
             if (!string.IsNullOrWhiteSpace(item.Field.Text)) continue;
             string hint = launcher.Text;
-            var found = await Task.Run(() => SteamLaunch.Detect(item.Launcher, hint));
-            string name = item.Launcher ? "官方启动器" : "国服游戏目录";
-            if (found.Count == 1) item.Field.Text = found[0];
-            else messages.Add(found.Count == 0 ? $"未找到{name}，请浏览选择。" : $"找到多个{name}，请点击自动识别选择。");
+            try
+            {
+                var found = await Task.Run(() => SteamLaunch.Detect(item.Launcher, hint));
+                // Preserve selections made while the background scan was running.
+                if (found.Count == 1 && string.IsNullOrWhiteSpace(item.Field.Text)) item.Field.Text = found[0];
+            }
+            catch { /* Automatic discovery skips unavailable locations; explicit detection reports errors. */ }
         }
-        Pull();
-        if (messages.Count > 0) ShowNotice(string.Join("\n", messages), true);
-    });
+        Pull(); Refresh();
+    }
     private void Pull()
     {
         service.Config.Account = (accounts.SelectedItem as SteamLaunch.Account)?.Id ?? "";
@@ -761,7 +781,7 @@ internal sealed class SteamLaunchPage : Grid
             acfState.Text = service.AcfStatus(service.Latest is not null);
             applyAcf.Content = File.Exists(service.AcfPath) ? "更新" : "应用";
             tile.BorderBrush = new SolidColorBrush(service.Configured() ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
-            icon.Path = Path.Combine(service.Config.GameDirectory, "Endfield.exe");
+            icon.Path = string.IsNullOrWhiteSpace(service.Config.GameDirectory) ? "" : Path.Combine(service.Config.GameDirectory, "Endfield.exe");
         }
         catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
     }
@@ -853,40 +873,50 @@ internal sealed class SteamLaunchPage : Grid
         if (directory is null) throw new InvalidOperationException("找不到目标目录。");
         Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true }); return Task.CompletedTask;
     }
-    private static ScrollViewer CodeView(string text)
-    {
-        var code = new TextBlock { Text = text.Replace("\r\n", "\n").Replace('\r', '\n'), IsTextSelectionEnabled = true,
-            TextWrapping = TextWrapping.NoWrap, FontFamily = new FontFamily("Consolas"), FontSize = 13, Margin = new Thickness(10) };
-        return new ScrollViewer { Content = code, Height = 280, HorizontalScrollMode = ScrollMode.Enabled,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    }
+    private static TextBlock CodeText(string text) => new() { Text = text, IsTextSelectionEnabled = true,
+        TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Consolas"), FontSize = 14, Margin = new Thickness(10, 3, 10, 3) };
     private async Task ViewAcf()
     {
-        var content = new StackPanel { Spacing = 12, Width = Math.Max(260, Math.Min(760, ActualWidth - 100)) };
-        void Add(string label, string text) { content.Children.Add(new TextBlock { Text = label }); content.Children.Add(CodeView(text)); }
-        if (File.Exists(service.AcfPath)) Add("当前文件", File.ReadAllText(service.AcfPath));
-        if (service.Draft is not null) Add("待应用内容", service.Draft);
-        if (content.Children.Count == 0) throw new InvalidOperationException("当前没有 ACF，请先获取最新数据并生成。");
-        var dialog = new ContentDialog { Title = "ACF 安装清单", Content = new ScrollViewer { Content = content }, CloseButtonText = "关闭" };
-        dialog.Resources["ContentDialogMaxWidth"] = 900d;
-        await dialogs.Show(dialog);
+        if (!File.Exists(service.AcfPath)) throw new InvalidOperationException("当前文件不存在，请先应用 ACF。");
+        var dialog = new ContentDialog { Title = Path.GetFileName(service.AcfPath),
+            Content = new ScrollViewer { Content = CodeText(File.ReadAllText(service.AcfPath)), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, CloseButtonText = "关闭" };
+        await dialogs.Show(dialog, expand: true);
     }
     private FrameworkElement Preview(SteamLaunch.Plan plan)
     {
-        var content = new StackPanel { Spacing = 12, Width = Math.Max(280, Math.Min(940, ActualWidth - 100)) };
+        var content = new StackPanel { Spacing = 18 };
+        var stroke = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
         foreach (var change in plan.Changes.Where(c => !SteamLaunch.Equal(c.Before, c.After)))
         {
-            content.Children.Add(new TextBlock { Text = change.Description + "\n" + change.Path, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
-            var pair = new Grid { ColumnSpacing = 12 };
-            pair.ColumnDefinitions.Add(new ColumnDefinition()); pair.ColumnDefinitions.Add(new ColumnDefinition());
-            void Side(int column, string label, byte[]? bytes)
+            var file = new StackPanel { Spacing = 10 };
+            file.Children.Add(new TextBlock { Text = change.Description + "\n" + change.Path, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true, Margin = new Thickness(12) });
+            string Decode(byte[]? bytes) => bytes is null ? "（文件不存在）" : bytes.Length == 0 ? "（零字节空文件）" : Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
+            string before = Decode(change.Before), after = Decode(change.After);
+            var header = new Grid(); header.ColumnDefinitions.Add(new()); header.ColumnDefinitions.Add(new());
+            void Header(int column, string label, string text)
             {
-                var panel = new StackPanel { Spacing = 6 };
-                panel.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                string text = bytes is null ? "（文件不存在）" : bytes.Length == 0 ? "（零字节空文件）" : Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
-                panel.Children.Add(CodeView(text)); Grid.SetColumn(panel, column); pair.Children.Add(panel);
+                var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(12, 0, 12, 8) };
+                panel.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+                var copy = new Button { Content = "复制全文" }; copy.Click += (_, _) => Dialogs.Copy(text); panel.Children.Add(copy);
+                Grid.SetColumn(panel, column); header.Children.Add(panel);
             }
-            Side(0, "变更前", change.Before); Side(1, "变更后", change.After); content.Children.Add(pair);
+            Header(0, "变更前 · 绿色", before); Header(1, "变更后 · 红色", after); file.Children.Add(header);
+            var lines = new Grid(); lines.ColumnDefinitions.Add(new()); lines.ColumnDefinitions.Add(new());
+            int row = 0;
+            foreach (var line in SteamLaunch.CompareLines(before, after))
+            {
+                lines.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                void Cell(int column, string? text, bool changed)
+                {
+                    var border = new Border { Child = CodeText(text ?? ""), BorderBrush = stroke,
+                        BorderThickness = new Thickness(column == 1 ? 1 : 0, 0, 0, 0),
+                        Background = changed && text is not null ? new SolidColorBrush(column == 0 ? Windows.UI.Color.FromArgb(55, 40, 180, 80) : Windows.UI.Color.FromArgb(55, 230, 60, 60)) : null };
+                    Grid.SetRow(border, row); Grid.SetColumn(border, column); lines.Children.Add(border);
+                }
+                Cell(0, line.Before, line.Changed); Cell(1, line.After, line.Changed); row++;
+            }
+            file.Children.Add(lines);
+            content.Children.Add(new Border { Child = file, BorderBrush = stroke, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(0, 0, 0, 10) });
         }
         return content;
     }
@@ -899,8 +929,7 @@ internal sealed class SteamLaunchPage : Grid
         if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return; }
         var text = Preview(plan);
         var dialog = new ContentDialog { Title = action == "remove" ? "移除配置 · 变更预览" : "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = action == "remove" ? "确认移除" : "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
-        dialog.Resources["ContentDialogMaxWidth"] = 1080d;
-        if (await dialogs.Show(dialog) != ContentDialogResult.Primary) return;
+        if (await dialogs.Show(dialog, expand: true) != ContentDialogResult.Primary) return;
         await Task.Run(() => service.Apply(plan));
         ShowNotice(action == "remove" ? "配置已移除，原有文件和启动选项已恢复。" : "配置已应用。", false);
     }

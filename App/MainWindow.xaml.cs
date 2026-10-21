@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.3", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.4", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -74,7 +74,12 @@ public sealed partial class MainWindow : Window
             if (session.Store.Settings.Tray && session.Store.Settings.CloseToTray) { args.Cancel = true; desktop.Minimize(); }
         };
         Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
-        Root.Loaded += (_, _) => { session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize(); };
+        Root.Loaded += async (_, _) =>
+        {
+            session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize();
+            if (!pages.TryGetValue("steam", out var steam)) pages["steam"] = steam = routes["steam"]();
+            if (steam is SteamLaunchPage setup) await setup.ScanOnce();
+        };
     }
     private void NavigationInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
