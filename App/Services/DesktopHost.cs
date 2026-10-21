@@ -44,10 +44,11 @@ public sealed class DesktopHost : IDisposable
     // Return false for an equal/newer instance (including versions we cannot identify).
     public static bool RequestUpgrade(string root)
     {
+        string identity = Identity(root);
         bool waiting = true;
         EnumWindows((handle, _) =>
         {
-            if (GetPropW(handle, Identity(root)) == 0) return true;
+            if (GetPropW(handle, identity) == 0) return true;
             GetWindowThreadProcessId(handle, out var pid);
             AllowSetForegroundWindow(pid);
             try

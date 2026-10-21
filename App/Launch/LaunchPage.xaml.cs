@@ -50,7 +50,7 @@ public sealed partial class LaunchPage : UserControl
         var display = session.Scheduler.QueueDisplay;
         RingLabel.Text = display.Label; RingValue.Text = display.Value; RingTask.Text = display.Name;
         PauseButton.Content = session.Scheduler.UserPaused ? "恢复自动队列" : "暂停自动队列";
-        EmptyQueue.Visibility = total == 0 && session.Store.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyQueue.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
         RunButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
         bool selectedDone = QueueList.SelectedItem is LaunchTask selected && session.Store.Done(selected, DateTime.Now);
@@ -93,7 +93,7 @@ public sealed partial class LaunchPage : UserControl
         var task = id is null ? preset ?? new LaunchTask { Path = path ?? "", Name = path is null ? "" : System.IO.Path.GetFileNameWithoutExtension(path), ProcessNames = path?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true ? [System.IO.Path.GetFileNameWithoutExtension(path)] : [] } : Current(id);
         if (task is null) return;
         var edited = await TaskEditor.Edit(task, dialogs, session, options, id is null); if (edited is null) return;
-        var tasks = session.Store.Tasks.Select(t => t.Clone()).ToList(); int index = tasks.FindIndex(t => t.Id == id);
+        var tasks = new List<LaunchTask>(session.Store.Tasks); int index = tasks.FindIndex(t => t.Id == id);
         if (id is null) tasks.AddRange(edited); else if (index >= 0) tasks[index] = edited[0]; else return;
         session.SaveTasks(tasks);
     }
@@ -118,7 +118,7 @@ public sealed partial class LaunchPage : UserControl
         if (action == "skip") { session.Execute(() => session.Scheduler.Skip(task)); return; }
         if (action == "mark") { session.Execute(() => session.Scheduler.Mark(task)); return; }
         if (action == "clear") { session.Execute(() => session.Scheduler.Clear(task)); return; }
-        var tasks = session.Store.Tasks.Select(t => t.Clone()).ToList(); int index = tasks.FindIndex(t => t.Id == id);
+        var tasks = new List<LaunchTask>(session.Store.Tasks); int index = tasks.FindIndex(t => t.Id == id);
         if (action == "delete") tasks.RemoveAt(index);
         else if (action == "duplicate") { var copy = task.Clone(); copy.Id = Guid.NewGuid().ToString(); copy.Name += " · 副本"; tasks.Insert(index + 1, copy); }
         else if (action is "up" or "down") { int target = index + (action == "up" ? -1 : 1); if (target < 0 || target >= tasks.Count) return; (tasks[index], tasks[target]) = (tasks[target], tasks[index]); }

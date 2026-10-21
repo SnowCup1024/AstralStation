@@ -1,14 +1,14 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.8**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.8.1**，暂不添加许可证。
 
-Alpha 3.8 优化调度轮询的进程名集合复用、运行日历的日期查找和并发图标加载的缓存写入，保留现有功能、交互与数据格式。
+Alpha 3.8.1 在全项目代码检查后，减少进度环重复绘制、安装检测中的重复归一化与分配、任务编辑的重复克隆，以及 Steam 设置快照和界面前置条件的重复计算。保留现有功能、交互与数据格式，不新增依赖。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含单文件：
 
-`.build/Alpha-3.8/AstralStation.exe`
+`.build/Alpha-3.8.1/AstralStation.exe`
 
 Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK。
 

@@ -11,6 +11,7 @@ public sealed class CompletionRing : Grid
     public SolidColorBrush ProgressBrush { get; } = new();
     private readonly Microsoft.UI.Xaml.Shapes.Path arc = new() { StrokeThickness = 5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
     private readonly Ellipse complete = new() { StrokeThickness = 5, Margin = new(3) };
+    private double progress = double.NaN;
     public CompletionRing()
     {
         Width = Height = 224;
@@ -22,6 +23,8 @@ public sealed class CompletionRing : Grid
     public void SetProgress(double fraction)
     {
         fraction = Math.Clamp(fraction, 0, 1);
+        if (fraction == progress) return;
+        progress = fraction;
         ProgressBrush.Color = fraction >= 1 ? Windows.UI.Color.FromArgb(255, 22, 150, 82) : Windows.UI.Color.FromArgb(255, 0, 153, 229);
         complete.Visibility = fraction >= 1 ? Visibility.Visible : Visibility.Collapsed;
         arc.Visibility = fraction is > 0 and < 1 ? Visibility.Visible : Visibility.Collapsed;

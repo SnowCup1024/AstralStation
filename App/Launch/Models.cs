@@ -27,7 +27,11 @@ public sealed class LaunchTask : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     public override string ToString() => Name;
     public LaunchTask Clone() => new() { Id = Id, Name = Name, Path = Path, ProcessNames = [.. ProcessNames], ResetSeconds = ResetSeconds, Arguments = Arguments, WorkingDirectory = WorkingDirectory, DelaySeconds = DelaySeconds, TimeoutSeconds = TimeoutSeconds };
-    public static string Normalize(string name) => name.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name.Trim()[..^4] : name.Trim();
+    public static string Normalize(string name)
+    {
+        name = name.Trim();
+        return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+    }
     public string Cycle(DateTime time) => Cycle(time, ResetSeconds);
     public static string Cycle(DateTime time, int reset) => (time.TimeOfDay.TotalSeconds < reset ? time.Date.AddDays(-1) : time.Date).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     public void Validate()

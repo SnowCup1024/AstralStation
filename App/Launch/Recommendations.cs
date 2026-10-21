@@ -9,7 +9,10 @@ namespace AstralStation.Launch;
 // Only the user's Alpha 2.0 list. No emulator, Steam, installer or generic launcher is a game process.
 public static class Recommendations
 {
-    private sealed record Profile(string Name, string[] Aliases, string? Executable = null);
+    private sealed record Profile(string Name, string[] Aliases, string? Executable = null)
+    {
+        public readonly string[] MatchKeys = Aliases.Select(Normalize).ToArray();
+    }
     private sealed record Shortcut(Profile Game, string Path, string Target);
     private static readonly Profile[] Profiles = [
         new("原神", ["Genshin Impact Game", "Genshin Impact", "原神", "原神游戏"], "YuanShen.exe"),
@@ -30,15 +33,19 @@ public static class Recommendations
         new("赛马娘", ["赛马娘", "闪耀优俊少女", "Umamusume", "ウマ娘"])
     ];
     private static string Normalize(string value) => string.Concat(value.Normalize(NormalizationForm.FormKC).Where(char.IsLetterOrDigit)).ToUpperInvariant();
+    private static readonly string[] UnrelatedNames = ["百闻牌", "决战平安京", "阴阳师妖怪屋", "壁纸", "Party Dash", "热血喧闹", "热血ハチャメチャ"];
+    private static readonly string[] ExcludedDirectories = ["steam", "steamapps", "BlueStacks", "MuMu", "LDPlayer", "Nox", "Engine", "Cache", "Logs", "Content", "Paks", "AssetBundles"];
+    private static readonly string[] HelperNames = ["launcher", "setup", "install", "update", "unins", "crash", "report", "patch", "cef", "webview", "anticheat", "dmmgameplayer"];
+    private static readonly string[] LauncherNames = ["hoyoplay", "mihoyo", "米哈游", "hypergryph", "gryphlink", "鹰角", "yostar"];
     private static bool Matches(Profile game, string value)
     {
-        if (new[] { "百闻牌", "决战平安京", "阴阳师妖怪屋", "壁纸", "Party Dash", "热血喧闹", "热血ハチャメチャ" }.Any(x => value.Contains(x, StringComparison.OrdinalIgnoreCase))) return false;
+        if (UnrelatedNames.Any(x => value.Contains(x, StringComparison.OrdinalIgnoreCase))) return false;
         string normalized = Normalize(value);
-        return game.Aliases.Any(alias => { string key = Normalize(alias); return key.Length <= 3 && key.All(char.IsAscii) ? normalized == key : normalized.Contains(key); });
+        return game.MatchKeys.Any(key => key.Length <= 3 && key.All(char.IsAscii) ? normalized == key : normalized.Contains(key));
     }
     private static bool Excluded(string path) => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-        .Any(part => new[] { "steam", "steamapps", "BlueStacks", "MuMu", "LDPlayer", "Nox", "Engine", "Cache", "Logs", "Content", "Paks", "AssetBundles" }.Contains(part, StringComparer.OrdinalIgnoreCase));
-    private static bool Helper(string name) => new[] { "launcher", "setup", "install", "update", "unins", "crash", "report", "patch", "cef", "webview", "anticheat", "dmmgameplayer" }
+        .Any(part => ExcludedDirectories.Contains(part, StringComparer.OrdinalIgnoreCase));
+    private static bool Helper(string name) => HelperNames
         .Any(part => name.Contains(part, StringComparison.OrdinalIgnoreCase));
 
     public static List<LaunchTask> Detect(CancellationToken token)
@@ -209,10 +216,10 @@ public static class Recommendations
             }
             foreach (var file in binaries)
             {
-                var links = shortcuts.Where(s => game.Executable is null && s.Game == game && (string.Equals(s.Target, file, StringComparison.OrdinalIgnoreCase)
-                    || file.StartsWith(Path.GetDirectoryName(s.Target)! + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))).ToArray();
+                var link = shortcuts.FirstOrDefault(s => game.Executable is null && s.Game == game && (string.Equals(s.Target, file, StringComparison.OrdinalIgnoreCase)
+                    || file.StartsWith(Path.GetDirectoryName(s.Target)! + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)));
                 // A remote launcher may live outside the game directory; only use it when unambiguous.
-                var link = links.FirstOrDefault() ?? (game.Executable is null && binaries.Count == 1 && shortcuts.Count(s => s.Game == game) == 1 ? shortcuts.Single(s => s.Game == game) : null);
+                link ??= game.Executable is null && binaries.Count == 1 && shortcuts.Count(s => s.Game == game) == 1 ? shortcuts.Single(s => s.Game == game) : null;
                 // DMM authentication cannot be replaced by running umamusume.exe directly.
                 if (link is null && (game.Name == "赛马娘" || file.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase))) continue;
                 string launch = link?.Path ?? file;
@@ -223,7 +230,7 @@ public static class Recommendations
         }
         return result.Values.ToList();
     }
-    private static bool Launcher(string value) => new[] { "hoyoplay", "mihoyo", "米哈游", "hypergryph", "gryphlink", "鹰角", "yostar" }.Any(w => value.Contains(w, StringComparison.OrdinalIgnoreCase));
+    private static bool Launcher(string value) => LauncherNames.Any(w => value.Contains(w, StringComparison.OrdinalIgnoreCase));
     private static IEnumerable<string> Files(string root, int depth, int budget, CancellationToken token)
     {
         var queue = new Queue<(string Path, int Depth)>(); queue.Enqueue((root, 0));

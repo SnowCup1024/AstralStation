@@ -31,6 +31,7 @@ internal sealed class SteamLaunch
         public string Arguments { get; set; } = "--game=endfield --reason=4";
         public int ExitGraceSeconds { get; set; } = 8;
         public bool CloseOwnedLauncher { get; set; } = true;
+        public Settings Clone() => (Settings)MemberwiseClone();
     }
     public sealed class Owned
     {
@@ -280,7 +281,7 @@ internal sealed class SteamLaunch
     internal SteamLaunch Snapshot()
     {
         var copy = (SteamLaunch)MemberwiseClone();
-        copy.Config = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(Config, Json), Json)!;
+        copy.Config = Config.Clone();
         copy.Accounts = [.. Accounts]; copy.Libraries = [.. Libraries];
         return copy;
     }
@@ -874,8 +875,9 @@ internal sealed class SteamLaunchPage : Grid
                 {
                     var view = await Task.Run(() =>
                     {
-                        var reasons = actions.Select(snapshot.BlockReason).ToArray();
-                        var stepReasons = prerequisites.Select(snapshot.BlockReason).ToArray();
+                        var checks = actions.Concat(prerequisites).Distinct().ToDictionary(action => action, snapshot.BlockReason);
+                        var reasons = actions.Select(action => checks[action]).ToArray();
+                        var stepReasons = prerequisites.Select(action => checks[action]).ToArray();
                         string target = "", manifest = "", manifestState = "请先完成账号与路径配置。";
                         if (Path.IsPathFullyQualified(snapshot.Config.Library))
                         {
