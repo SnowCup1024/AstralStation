@@ -17,11 +17,11 @@ public sealed class Dialogs(Window window, FrameworkElement root, LaunchSession 
         dialog.XamlRoot = root.XamlRoot; dialog.RequestedTheme = root.ActualTheme;
         void Fit()
         {
-            dialog.MaxWidth = Math.Max(280, root.ActualWidth - 32);
-            dialog.MaxHeight = Math.Max(240, root.ActualHeight - 32);
+            dialog.MaxWidth = root.ActualWidth * .9;
+            dialog.MaxHeight = root.ActualHeight * .9;
             if (expand)
             {
-                double width = Math.Max(280, root.ActualWidth - 48), height = Math.Max(240, root.ActualHeight - 48);
+                double width = root.ActualWidth * .9, height = root.ActualHeight * .9;
                 dialog.Resources["ContentDialogMaxWidth"] = width;
                 dialog.Resources["ContentDialogMaxHeight"] = height;
                 FrameworkElement? Find(DependencyObject node)
@@ -32,7 +32,9 @@ public sealed class Dialogs(Window window, FrameworkElement root, LaunchSession 
                     return null;
                 }
                 if (Find(dialog) is { } panel) { panel.MaxWidth = panel.Width = width; panel.MaxHeight = panel.Height = height; }
-                dialog.Width = width; dialog.Height = height;
+                // Keep the popup host full-size so its centered surface has equal margins.
+                dialog.MaxWidth = dialog.Width = root.ActualWidth;
+                dialog.MaxHeight = dialog.Height = root.ActualHeight;
                 if (dialog.Content is ScrollViewer viewer) { viewer.Width = Math.Max(200, width - 64); viewer.Height = Math.Max(100, height - 170); }
             }
             if (dialog.Content is ScrollViewer form) form.MaxHeight = Math.Max(120, root.ActualHeight - 200);
