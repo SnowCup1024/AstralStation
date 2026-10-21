@@ -37,7 +37,7 @@
      </ListView><TextBlock x:Name="EmptyQueue" Text="还没有任务。添加一个游戏或脚本，开始安排今日队列。" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="340"/></Grid></Grid></Grid></Border>
      <Border x:Name="QueueActions" Grid.Row="1" Visibility="Collapsed" Style="{StaticResource SectionCard}" Padding="12">
       <Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="RunButton" Content="启动此任务" Click="RunSelected" Style="{StaticResource AccentButtonStyle}"/><Button Content="此任务标注为完成" Click="MarkSelected"/><Button Content="重置此任务进度" Click="ClearSelected"/></StackPanel></ScrollViewer>
+       <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="RunButton" Content="启动此任务" Click="RunSelected" Style="{StaticResource AccentButtonStyle}"/><Button x:Name="MarkButton" Content="标注此任务为完成" Click="MarkSelected"/><Button x:Name="ClearButton" Content="重置此任务进度" Click="ClearSelected" Visibility="Collapsed"/></StackPanel></ScrollViewer>
        <Button Grid.Column="1" Content="重置全部任务进度" Click="ResetAll" VerticalAlignment="Center"/>
       </Grid>
      </Border>

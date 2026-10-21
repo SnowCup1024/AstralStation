@@ -53,7 +53,10 @@ public sealed partial class LaunchPage : UserControl
         EmptyQueue.Visibility = total == 0 && session.Store.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
         RunButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
-        RunButton.Content = QueueList.SelectedItem is LaunchTask selected && session.Store.Done(selected, DateTime.Now) ? "重试此任务" : "启动此任务";
+        bool selectedDone = QueueList.SelectedItem is LaunchTask selected && session.Store.Done(selected, DateTime.Now);
+        RunButton.Content = selectedDone ? "重试此任务" : "启动此任务";
+        MarkButton.Visibility = selectedDone ? Visibility.Collapsed : Visibility.Visible;
+        ClearButton.Visibility = selectedDone ? Visibility.Visible : Visibility.Collapsed;
         QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
@@ -153,7 +156,8 @@ public sealed partial class LaunchPage : UserControl
     private void ShowMenu(FrameworkElement target, LaunchTask? task)
     {
         if (task is null) return; string id = task.Id; var menu = new MenuFlyout(); IDisposable? scope = null;
-        foreach (var (label, action) in new[] { (session.Store.Done(task, DateTime.Now) ? "重试" : "启动", "run"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), ("标记完成", "mark"), ("重置此任务进度", "clear"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
+        bool done = session.Store.Done(task, DateTime.Now);
+        foreach (var (label, action) in new[] { (done ? "重试" : "启动", "run"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), done ? ("重置此任务进度", "clear") : ("标注此任务为完成", "mark"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
         {
             var item = new MenuFlyoutItem { Text = label }; item.Click += (_, _) => { menu.Hide(); DispatcherQueue.TryEnqueue(async () => await Guard(() => Action(id, action))); }; menu.Items.Add(item);
         }
