@@ -139,7 +139,8 @@ internal sealed class SteamLaunch
         if (action is "remove" or "bootstrap") return;
         if (!Path.IsPathFullyQualified(SteamRoot) || !File.Exists(Path.Combine(SteamRoot, "steam.exe"))) throw new InvalidOperationException("请先选择或检测 Steam 路径。");
         if (!Accounts.Any(a => a.Id == Config.Account)) throw new InvalidOperationException("请先选择 Steam 账号。");
-        ValidatePaths();
+        if (action == "exe" && PlaceholderStatus().BlockReason is string reason) throw new InvalidOperationException(reason);
+        ValidatePaths(inspectOnly: action == "inspect-exe");
         if (action is "generate" or "acf" or "runtime")
             if (!File.Exists(ExePath)) throw new InvalidOperationException("请先生成游戏 EXE 占位文件。");
         if (action == "runtime")
@@ -150,6 +151,14 @@ internal sealed class SteamLaunch
     {
         try { Require(action); return null; }
         catch (Exception ex) { return ex.Message; }
+    }
+    public (string Text, string? BlockReason, bool NonEmpty) PlaceholderStatus()
+    {
+        string path = ExePath;
+        if (!File.Exists(path)) return ("当前不存在", null, false);
+        long size = new FileInfo(path).Length;
+        string sizeText = size == 0 ? "0 B" : $"{size / 1024d:0.###} KB";
+        return ($"当前已存在 {sizeText} 的 {Path.GetFileName(path)} 文件", size == 0 ? "已存在，不需要生成" : "已有非空EXE文件，请检查", size != 0);
     }
     private static string AccountId(string value) => Regex.IsMatch(value, "^[1-9][0-9]{0,9}$") ? value : throw new InvalidOperationException("请选择 Steam 账号。");
     internal static string Under(string root, params string[] parts)
@@ -252,9 +261,13 @@ internal sealed class SteamLaunch
             if (File.Exists(prior) && new FileInfo(prior).Length != 0) throw new InvalidOperationException("现有 Steam 安装目录包含非空 EXE，已拒绝修改。\n" + prior);
         }
     }
-    public void ValidatePaths()
+    public void ValidatePaths(bool inspectOnly = false)
     {
-        GuardInstallation();
+        if (inspectOnly)
+        {
+            if (!Libraries.Contains(Config.Library, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("所选位置不是 Steam 已登记的安装位置。");
+        }
+        else GuardInstallation();
         foreach (string path in new[] { Config.Launcher, Path.Combine(Config.GameDirectory, "Endfield.exe") })
         {
             if (!Path.IsPathFullyQualified(path) || !File.Exists(path) || new FileInfo(path).Length == 0) throw new InvalidOperationException("未找到有效程序：" + path);
@@ -376,12 +389,12 @@ internal sealed class SteamLaunch
                 if (Latest is null || Draft is null || draftLibrary != Config.Library) throw new InvalidOperationException("请先点击“获取最新数据并生成”。");
                 FileChange(AcfPath, Utf8(GenerateAcf(Latest)), "acf", $"{(File.Exists(AcfPath) ? "更新" : "应用")} ACF，buildid → {Latest.Build}，SizeOnDisk → 0");
             }
-            if (action is "all" or "exe" or "acf" or "runtime")
+            if (action is "all" or "acf" or "runtime")
             {
                 ValidatePaths();
                 FileChange(ConfigPath, Utf8(JsonSerializer.Serialize(Config, Json)), "config", $"保存启动设置\n官方启动器：{Config.Launcher}\n国服目录：{Config.GameDirectory}\n启动参数：{Config.Arguments}\n退出等待：{Config.ExitGraceSeconds} 秒\n关闭本次新开的启动器：{(Config.CloseOwnedLauncher ? "开启" : "关闭")}");
             }
-            if ((action is "all" or "exe" or "acf" or "runtime" or "bootstrap") && !File.Exists(ScriptPath))
+            if ((action is "all" or "acf" or "runtime" or "bootstrap") && !File.Exists(ScriptPath))
                 FileChange(ScriptPath, [239, 187, 191, .. Utf8(Script)], "script", "自动生成启动脚本");
             changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), Utf8(JsonSerializer.Serialize(receipt, Json)), "保存原始配置备份"));
         }
@@ -701,6 +714,8 @@ internal sealed class SteamLaunchPage : Grid
     private readonly List<(ContentControl Host, string Action)> steps = [];
     private readonly TextBox options = ReadOnly();
     private readonly TextBlock exeState = new(), acfState = new();
+    // The enabled wrapper receives hover events while its child button is disabled.
+    private readonly Border exeButtonHost = new() { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) };
     private readonly Button applyAcf = new() { Content = "应用", IsEnabled = false };
     private readonly Border tile = new() { CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(2), Padding = new Thickness(20) };
     private readonly GameIcon icon = new() { Width = 52, Height = 52 };
@@ -758,9 +773,10 @@ internal sealed class SteamLaunchPage : Grid
         libraryRow = Row("Steam 安装位置", libraries);
         libraryRow.Visibility = service.Libraries.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         basics.Children.Add(libraryRow);
-        var executable = Card("2 · Steam 游戏占位文件", "exe");
+        var executable = Card("2 · 空EXE占位文件", "inspect-exe");
         executable.Children.Add(Row("游戏 EXE 文件", FieldActions(exe, Button("打开所在目录", () => OpenFolder(service.ExePath)))));
-        executable.Children.Add(Row(exeState, Buttons(Guarded("生成", "exe", () => Change("exe")))));
+        exeButtonHost.Child = Guarded("生成空EXE文件", "exe", () => Change("exe"));
+        executable.Children.Add(Row(exeState, Buttons(exeButtonHost)));
         var manifest = Card("3 · ACF 安装清单", "generate");
         manifest.Children.Add(Row("ACF 安装清单", FieldActions(acf, Button("查看内容", ViewAcf), Button("打开所在目录", () => OpenFolder(service.AcfPath)))));
         applyAcf.Click += async (_, _) => await Run(() => Change("acf")); guarded.Add((applyAcf, "acf"));
@@ -869,8 +885,8 @@ internal sealed class SteamLaunchPage : Grid
                             try { target = snapshot.ExePath; manifestState = snapshot.AcfStatus(snapshot.Latest is not null); }
                             catch (Exception ex) { manifestState = ErrorMessage(ex); }
                         }
-                        string state = !File.Exists(target) ? "当前不存在" : new FileInfo(target).Length == 0 ? "当前已存在" : "存在非空文件，已拒绝生成和应用。";
-                        return (Reasons: reasons, StepReasons: stepReasons, Exe: target, Acf: manifest, ExeState: state,
+                        var placeholder = target.Length == 0 ? (Text: "当前不存在", BlockReason: (string?)null, NonEmpty: false) : snapshot.PlaceholderStatus();
+                        return (Reasons: reasons, StepReasons: stepReasons, Exe: target, Acf: manifest, Placeholder: placeholder,
                             AcfState: manifestState, Exists: File.Exists(manifest), Configured: snapshot.Configured());
                     });
                     if (revision != refreshRevision) continue;
@@ -878,6 +894,7 @@ internal sealed class SteamLaunchPage : Grid
                     {
                         guarded[i].Button.IsEnabled = view.Reasons[i] is null;
                         ToolTipService.SetToolTip(guarded[i].Button, view.Reasons[i]);
+                        if (guarded[i].Action == "exe") ToolTipService.SetToolTip(exeButtonHost, view.Reasons[i]);
                     }
                     for (int i = 0; i < steps.Count; i++)
                     {
@@ -886,8 +903,8 @@ internal sealed class SteamLaunchPage : Grid
                         ToolTipService.SetToolTip(steps[i].Host, view.StepReasons[i]);
                     }
                     exe.Text = view.Exe; acf.Text = view.Acf; options.Text = service.LaunchOptions;
-                    exeState.Text = view.ExeState;
-                    exeState.Foreground = new SolidColorBrush(view.ExeState.StartsWith("存在非空") ? Microsoft.UI.Colors.Firebrick : ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
+                    exeState.Text = view.Placeholder.Text;
+                    exeState.Foreground = new SolidColorBrush(view.Placeholder.NonEmpty ? Microsoft.UI.Colors.Firebrick : ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
                     acfState.Text = view.AcfState; applyAcf.Content = view.Exists ? "更新" : "应用";
                     tile.BorderBrush = new SolidColorBrush(view.Configured ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
                 }
@@ -1064,6 +1081,11 @@ internal sealed class SteamLaunchPage : Grid
         if (action == "all" && service.Draft is null) await service.Fetch(complete: true);
         if (action == "exe" && service.Latest is null) await service.Fetch(false);
         var plan = service.Prepare(action);
+        if (action == "exe")
+        {
+            await Task.Run(() => service.Apply(plan));
+            ShowNotice("已生成空 EXE 文件：" + service.ExePath, false); return;
+        }
         if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return; }
         var text = Preview(plan);
         var dialog = new ContentDialog { Title = action == "remove" ? "移除配置 · 变更预览" : "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = action == "remove" ? "确认移除" : "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };

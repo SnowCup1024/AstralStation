@@ -52,7 +52,8 @@ public sealed partial class LaunchPage : UserControl
         PauseButton.Content = session.Scheduler.UserPaused ? "恢复自动队列" : "暂停自动队列";
         EmptyQueue.Visibility = total == 0 && session.Store.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         ErrorBar.IsOpen = session.Store.Error is not null; ErrorBar.Message = session.Store.Error ?? "";
-        RunButton.IsEnabled = RetryButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
+        RunButton.IsEnabled = QueueList.SelectedItem is not null && session.Store.Error is null;
+        RunButton.Content = QueueList.SelectedItem is LaunchTask selected && session.Store.Done(selected, DateTime.Now) ? "重试此任务" : "启动此任务";
         QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
@@ -97,16 +98,16 @@ public sealed partial class LaunchPage : UserControl
     {
         var task = Current(id); if (task is null) return;
         if (action is "edit" or "options") { await Edit(id, action == "options"); return; }
-        if (action is "run" or "retry")
+        if (action == "run")
         {
-            if (!await dialogs.Confirm(action == "retry" ? "重试任务" : "启动任务", task.Name + "\n" + task.Path)) return;
+            if (!await dialogs.Confirm(session.Store.Done(task, DateTime.Now) ? "重试任务" : "启动任务", task.Name + "\n" + task.Path)) return;
             task = Current(id); if (task is null) return;
-            if (action == "retry") session.Execute(() => session.Scheduler.Retry(task));
+            if (session.Store.Done(task, DateTime.Now)) session.Execute(() => session.Scheduler.Retry(task));
             session.Execute(() => session.Scheduler.RunNow(task)); return;
         }
         if (action is "mark" or "clear" or "delete")
         {
-            if (!await dialogs.Confirm(action == "delete" ? "删除任务" : action == "mark" ? "标记完成" : "清除完成状态", task.Name + (action == "delete" ? "\n已有程序和历史记录会保留。" : "\n手动修改不会生成启动历史。"))) return;
+            if (!await dialogs.Confirm(action == "delete" ? "删除任务" : action == "mark" ? "标记完成" : "重置此任务进度", task.Name + (action == "delete" ? "\n已有程序和历史记录会保留。" : action == "clear" ? "\n清除此任务的今日完成状态并暂停自动队列，已发起的运行继续监测。其他任务进度保留。" : "\n手动修改不会生成启动历史。"))) return;
             task = Current(id); if (task is null) return;
         }
         if (action == "copy") { Dialogs.Copy(task.Path); return; }
@@ -124,7 +125,7 @@ public sealed partial class LaunchPage : UserControl
     private async void AddTask(object sender, RoutedEventArgs e) => await Guard(() => Edit(null));
     private void Pause(object sender, RoutedEventArgs e) => session.TogglePause();
     private async void RunSelected(object sender, RoutedEventArgs e) => await SelectedAction("run");
-    private async void RetrySelected(object sender, RoutedEventArgs e) => await SelectedAction("retry");
+    private async void ClearSelected(object sender, RoutedEventArgs e) => await SelectedAction("clear");
     private async void MarkSelected(object sender, RoutedEventArgs e) => await SelectedAction("mark");
     private async void EditSelected(object sender, RoutedEventArgs e) => await SelectedAction("edit");
     private async void OptionsSelected(object sender, RoutedEventArgs e) => await SelectedAction("options");
@@ -152,7 +153,7 @@ public sealed partial class LaunchPage : UserControl
     private void ShowMenu(FrameworkElement target, LaunchTask? task)
     {
         if (task is null) return; string id = task.Id; var menu = new MenuFlyout(); IDisposable? scope = null;
-        foreach (var (label, action) in new[] { ("启动", "run"), ("重试", "retry"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), ("标记完成", "mark"), ("清除完成", "clear"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
+        foreach (var (label, action) in new[] { (session.Store.Done(task, DateTime.Now) ? "重试" : "启动", "run"), ("编辑", "edit"), ("启动选项", "options"), ("复制任务", "duplicate"), ("标记完成", "mark"), ("重置此任务进度", "clear"), ("跳过本周期", "skip"), ("打开所在目录", "folder"), ("复制路径", "copy"), ("删除", "delete") })
         {
             var item = new MenuFlyoutItem { Text = label }; item.Click += (_, _) => { menu.Hide(); DispatcherQueue.TryEnqueue(async () => await Guard(() => Action(id, action))); }; menu.Items.Add(item);
         }
