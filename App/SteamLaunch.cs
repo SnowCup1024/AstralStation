@@ -131,6 +131,7 @@ internal sealed class SteamLaunch
     }
     public void Require(string action)
     {
+        if (action == "options") throw new InvalidOperationException("启动选项只支持复制，请在 Steam 中手动填写。");
         if (action == "remove") return;
         if (!Accounts.Any(a => a.Id == Config.Account)) throw new InvalidOperationException("请先选择 Steam 账号。");
         ValidatePaths();
@@ -301,12 +302,6 @@ internal sealed class SteamLaunch
     private static byte[] Utf8(string text) => new UTF8Encoding(false).GetBytes(text);
     private static byte[]? ReadBytes(string path) => File.Exists(path) ? File.ReadAllBytes(path) : null;
     internal static bool Equal(byte[]? a, byte[]? b) => a is null ? b is null : b is not null && a.AsSpan().SequenceEqual(b);
-    private static byte[] VdfBytes(byte[] original, string text)
-    {
-        // Steam's text VDF is UTF-8; retain its BOM when present.
-        bool bom = original.AsSpan().StartsWith(new byte[] { 239, 187, 191 });
-        return bom ? [239, 187, 191, .. Utf8(text.TrimStart('\uFEFF'))] : Utf8(text);
-    }
     private static void SteamClosed()
     {
         foreach (string name in new[] { "steam", "steamwebhelper" })
@@ -339,15 +334,7 @@ internal sealed class SteamLaunch
             {
                 NoLinks(item.Path);
                 byte[]? before = ReadBytes(item.Path);
-                if (item.Kind == "options")
-                {
-                    if (before is null) throw new InvalidOperationException("Steam 账号配置已不存在：" + item.Path);
-                    var vdf = new Kv(Encoding.UTF8.GetString(before));
-                    if (vdf.Find(OptionKeys)?.Value != item.Applied) throw new InvalidOperationException("Steam 启动选项已被另行修改，拒绝覆盖：" + item.Path);
-                    changes.Add(new(item.Path, before, VdfBytes(before, vdf.Set(OptionKeys, item.Original)), "恢复原启动选项"));
-                    details.Add($"恢复启动选项：{item.Path}\n当前：{item.Applied}\n恢复：{item.Original ?? "（未设置）"}");
-                }
-                else
+                if (item.Kind == "options") continue;
                 {
                     byte[] applied = Convert.FromBase64String(item.Applied);
                     if (!Equal(before, applied) && !(item.Kind == "acf" && OnlyAcfRuntimeChanged(before, applied))) throw new InvalidOperationException("文件已改变，不能自动移除：" + item.Path);
@@ -356,7 +343,9 @@ internal sealed class SteamLaunch
                     details.Add((original is null ? "删除：" : "恢复：") + item.Path);
                 }
             }
-            changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), null, "移除本次配置记录"));
+            receipt.Files.RemoveAll(f => f.Kind != "options");
+            changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), receipt.Files.Count == 0 ? null : Utf8(JsonSerializer.Serialize(receipt, Json)), "移除本次配置记录，保留旧版启动选项备份"));
+            details.Add("Steam 启动选项请在 Steam 中手动清除或恢复。");
         }
         else
         {
@@ -379,28 +368,15 @@ internal sealed class SteamLaunch
                 string script = editedScript ?? (action == "all" && File.Exists(ScriptPath) ? File.ReadAllText(ScriptPath) : Script);
                 FileChange(ScriptPath, [239, 187, 191, .. Utf8(script.TrimStart('\uFEFF'))], "script", editedScript is not null ? "保存编辑后的脚本" : action == "script" && File.Exists(ScriptPath) ? "用 Alpha 3.0 内置逻辑重新生成脚本（替换已有脚本）" : "生成 / 保留启动脚本");
             }
-            if (action is "all" or "options")
-            {
-                ValidatePaths();
-                if (action == "options" && (!File.Exists(ScriptPath) || !File.Exists(ConfigPath))) throw new InvalidOperationException("请先生成启动脚本。");
-                string path = LocalConfigPath; NoLinks(path);
-                byte[] before = File.ReadAllBytes(path);
-                var vdf = new Kv(Encoding.UTF8.GetString(before));
-                string? current = vdf.Find(OptionKeys)?.Value;
-                var owned = receipt.Files.SingleOrDefault(o => o.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
-                if (owned is not null && current != owned.Applied) throw new InvalidOperationException("Steam 启动选项已被另行修改，请先核对并恢复已应用的选项。");
-                if (owned is null) { owned = new() { Path = path, Kind = "options", Original = current }; receipt.Files.Add(owned); }
-                owned.Applied = LaunchOptions;
-                changes.Add(new(path, before, VdfBytes(before, vdf.Set(OptionKeys, LaunchOptions)), "写入 Steam 启动选项"));
-                details.Add($"Steam 账号：{Accounts.FirstOrDefault(a => a.Id == Config.Account)}\n{path}\n当前：{current ?? "（未设置）"}\n将改为：{LaunchOptions}");
-            }
             changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), Utf8(JsonSerializer.Serialize(receipt, Json)), "保存原始配置备份"));
         }
         return new(changes, string.Join("\n\n", details));
     }
     public void Apply(Plan plan)
     {
-        if (plan.Changes.Any(c => c.Path.EndsWith(".acf", StringComparison.OrdinalIgnoreCase) || c.Path.EndsWith("localconfig.vdf", StringComparison.OrdinalIgnoreCase))) checkSteamClosed();
+        if (plan.Changes.Any(c => c.Path.EndsWith(".vdf", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("禁止写入 Steam 账号配置；启动选项只能复制后手动填写。");
+        if (plan.Changes.Any(c => c.Path.EndsWith(".acf", StringComparison.OrdinalIgnoreCase))) checkSteamClosed();
         using var mutex = new Mutex(false, @"Local\AstralStation.SteamLaunch.Configure");
         bool acquired; try { acquired = mutex.WaitOne(0); } catch (AbandonedMutexException) { acquired = true; }
         if (!acquired) throw new InvalidOperationException("另一个配置操作正在进行。");
@@ -443,7 +419,7 @@ internal sealed class SteamLaunch
         try
         {
             ValidatePaths(); var receipt = ReadReceipt();
-            return receipt.Files.Any(f => f.Kind == "options" && f.Path.Equals(LocalConfigPath, StringComparison.OrdinalIgnoreCase)) && File.Exists(ExePath) && File.Exists(AcfPath) && File.Exists(ScriptPath) && File.Exists(ConfigPath) && File.ReadAllText(ConfigPath) == JsonSerializer.Serialize(Config, Json) && CurrentOptions() == LaunchOptions && ReadAcf().Get("StateFlags") == "4";
+            return receipt.Files.Any(f => f.Kind == "script") && File.Exists(ExePath) && File.Exists(AcfPath) && File.Exists(ScriptPath) && File.Exists(ConfigPath) && File.ReadAllText(ConfigPath) == JsonSerializer.Serialize(Config, Json) && CurrentOptions() == LaunchOptions && ReadAcf().Get("StateFlags") == "4";
         }
         catch { return false; }
     }
@@ -728,7 +704,7 @@ internal sealed class SteamLaunchPage : Grid
         scripting.Children.Add(Right(Buttons(Guarded("生成", "script", () => Change("script")), Guarded("编辑", "edit", EditScript))));
         var launching = Card("5 · Steam 启动选项");
         launching.Children.Add(Row("Steam 启动选项", options));
-        launching.Children.Add(Right(Buttons(Guarded("写入 Steam", "options", () => Change("options")), Guarded("复制", "options", () => { Dialogs.Copy(service.LaunchOptions); return Task.CompletedTask; }))));
+        launching.Children.Add(Row("复制后在 Steam 游戏属性的启动选项中手动填写。", Buttons(Button("复制", () => { Dialogs.Copy(service.LaunchOptions); return Task.CompletedTask; }))));
         var complete = Card("整套配置");
         complete.Children.Add(Row("填写账号与国服路径后，可按顺序一键应用。", Buttons(Button("一键移除配置", () => Change("remove")), Guarded("一键应用配置", "all", () => Change("all")))));
         accounts.SelectionChanged += (_, _) => { if (initialized && !busy) { Pull(); Refresh(); } };
@@ -931,7 +907,7 @@ internal sealed class SteamLaunchPage : Grid
         var dialog = new ContentDialog { Title = action == "remove" ? "移除配置 · 变更预览" : "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = action == "remove" ? "确认移除" : "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
         if (await dialogs.Show(dialog, expand: true) != ContentDialogResult.Primary) return;
         await Task.Run(() => service.Apply(plan));
-        ShowNotice(action == "remove" ? "配置已移除，原有文件和启动选项已恢复。" : "配置已应用。", false);
+        ShowNotice(action == "remove" ? "文件配置已移除。Steam 启动选项请手动清除或恢复。" : "文件配置已应用。请复制启动选项并在 Steam 中手动填写。", false);
     }
     private async Task EditScript()
     {
