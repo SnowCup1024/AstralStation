@@ -744,6 +744,14 @@ internal sealed class SteamLaunchPage : Grid
         Children.Add(notice);
         var tileContent = new StackPanel { Spacing = 12, Width = 150, HorizontalAlignment = HorizontalAlignment.Center };
         tileContent.Children.Add(icon); tileContent.Children.Add(new TextBlock { Text = SteamLaunch.GameName, TextAlignment = TextAlignment.Center });
+        games.Resources["GridViewItemCornerRadius"] = tile.CornerRadius;
+        var tileStyle = new Style(typeof(GridViewItem)) { BasedOn = (Style)Application.Current.Resources["DefaultGridViewItemStyle"] };
+        tileStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, tile.CornerRadius));
+        tileStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
+        tileStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        tileStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Stretch));
+        tileStyle.Setters.Add(new Setter(Control.FocusVisualMarginProperty, new Thickness(0)));
+        games.ItemContainerStyle = tileStyle;
         tile.Child = tileContent; games.Items.Add(tile); page.Children.Add(games);
         form.Visibility = Visibility.Collapsed; formHost.Content = form; page.Children.Add(formHost);
         games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await Run(() => Task.Run(service.EnsureScript)); await CheckVersion(); };
