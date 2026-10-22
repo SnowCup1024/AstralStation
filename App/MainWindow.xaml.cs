@@ -17,7 +17,6 @@ public sealed partial class MainWindow : Window
     private readonly DesktopHost desktop;
     private readonly Dialogs dialogs;
     private LaunchPage? launchPage;
-    private string activeRoute = "launch";
     private bool forceExit, closed, keepOpen, restoreAfterRuns, completionEligible;
     private double? closeDeadline;
     private ContentDialog? completionDialog;
@@ -31,7 +30,7 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         session = new(dataRoot, paused, DispatcherQueue);
-        completionEligible = loginStartup || session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now));
+        completionEligible = loginStartup || !session.Scheduler.AllDone;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBar);
         double scale = DesktopHost.GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96d;
@@ -43,7 +42,7 @@ public sealed partial class MainWindow : Window
         dialogs = new(this, Root, session);
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
-        routes["launch"] = () => { launchPage = new(session, dialogs); launchPage.SectionChanged += () => { CancelCountdown(); }; return launchPage; };
+        routes["launch"] = () => launchPage = new(session, dialogs);
         routes["steam"] = () =>
         {
             var args = Environment.GetCommandLineArgs();
@@ -53,12 +52,12 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.8.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
-        session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
+        session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
         desktop.RestoreRequested += Restore;
-        desktop.UserRestored += () => { foreach (var request in running.Values) request.Attempted = true; if (closeDeadline is not null) { keepOpen = true; CancelCountdown(); } };
+        desktop.UserRestored += () => { foreach (var request in running.Values) request.Attempted = true; };
         desktop.PauseRequested += session.TogglePause;
         desktop.ExitRequested += RequestExit;
         desktop.UpgradeRequested += () =>
@@ -95,12 +94,11 @@ public sealed partial class MainWindow : Window
     private void Navigate(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is not NavigationViewItem { Tag: string key } || !routes.TryGetValue(key, out var factory)) return;
-        activeRoute = key;
         if (!pages.TryGetValue(key, out var page)) pages[key] = page = factory();
         ResetPage(page);
         PageHost.Content = page;
         PageHost.ContentTransitions = new TransitionCollection { new EntranceThemeTransition() };
-        if (session is not null) { session.SetManaging(key == "launch" && launchPage?.IsLibrary == true); CancelCountdown(); }
+        if (session is not null) session.SetManaging(key == "launch" && launchPage?.IsLibrary == true);
     }
     private static StackPanel Intro(string title, string subtitle, string body)
     {
@@ -144,7 +142,7 @@ public sealed partial class MainWindow : Window
             Grid.SetColumn(control, 1); row.Children.Add(control); launch.Children.Add(row);
         }
         Row("全部任务完成并退出后", autoClose);
-        launch.Children.Add(new TextBlock { Text = "本次任务全部完成并退出后，或 Windows 登录启动时任务已全部完成，才会倒计时。任务已完成时手动打开将保持打开。仅停留在今日队列时生效，记录保存失败或仍有运行任务时不会退出。", FontSize = 13 });
+        launch.Children.Add(new TextBlock { Text = "全部任务完成并退出后，自动倒计时 15 秒。只有手动打开时发现今日任务已全部完成，才默认保持打开。任务运行中、记录保存失败或正在操作弹窗时不会退出。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         Row("允许托盘后台运行", tray); Row("关闭窗口时", closeToTray); Row("Windows 登录时启动", login);
         async void Save(object sender, SelectionChangedEventArgs args)
         {
@@ -175,14 +173,14 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = data });
         return new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
-    private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (session.Scheduler.AllDone) { keepOpen = true; CancelCountdown(); } desktop.Restore(); }
+    private void Restore() { foreach (var request in running.Values) request.Attempted = true; if (session.Scheduler.AllDone) { completionEligible = false; CancelCountdown(); } desktop.Restore(); }
     private void RequestExit() { if (session.Interacting || session.Scheduler.Launching) { Restore(); return; } forceExit = true; completionDialog?.Hide(); Close(); }
     private void CancelCountdown() { closeDeadline = null; completionDialog?.Hide(); }
-    private bool CanClose => completionEligible && session.Store.Settings.AutoClose && !keepOpen && activeRoute == "launch" && launchPage?.IsQueue == true && session.Scheduler.AllDone && !session.Interacting && session.Store.Error is null;
+    private bool CanClose => completionEligible && session.Store.Settings.AutoClose && !keepOpen && session.Scheduler.AllDone && !session.Interacting && session.Store.Error is null;
     private void UpdateLifecycle()
     {
         if (closed) return;
-        if (session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now))) completionEligible = true;
+        if (session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now))) { completionEligible = true; keepOpen = false; }
         if (session.Interacting || session.Store.Error is not null) { CancelCountdown(); return; }
         if (running.Count == 0 && restoreAfterRuns && !CanClose) { restoreAfterRuns = false; desktop.Restore(); }
         foreach (var request in running.Values)
@@ -214,7 +212,7 @@ public sealed partial class MainWindow : Window
         completionDialog = dialog;
         dialog.CloseButtonClick += (_, _) => { keepOpen = true; closeDeadline = null; };
         dialog.KeyDown += (_, e) => { if (e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Escape) { keepOpen = true; closeDeadline = null; dialog.Hide(); e.Handled = true; } };
-        try { await dialog.ShowAsync(); if (closeDeadline is not null && !closed) { keepOpen = true; closeDeadline = null; } }
+        try { await dialog.ShowAsync(); }
         finally { completionDialog = null; countdownText = null; }
     }
 }
