@@ -137,6 +137,18 @@ public sealed class DesktopHost : IDisposable
         return Path.Combine(dataRoot, "Startup", version, "AstralStation.exe");
     }
     private static string StartupCommand(string dataRoot) => Quote(LoginTarget(dataRoot)) + " --data-dir " + Quote(dataRoot) + " --login-startup";
+    private static string? RegisteredLoginTarget(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command) || command[0] != '"') return null;
+        int end = command.IndexOf('"', 1);
+        return end > 1 && Path.IsPathFullyQualified(command[1..end]) ? command[1..end] : null;
+    }
+    private static bool HasNewerLoginTarget(string command)
+    {
+        string? target = RegisteredLoginTarget(command);
+        return target is not null && File.Exists(target) && CompareVersions(FileVersionInfo.GetVersionInfo(target).ProductVersion,
+            typeof(DesktopHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion) > 0;
+    }
     private static void InstallLoginTarget(string dataRoot)
     {
         string target = LoginTarget(dataRoot), source = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序位置。");
@@ -153,19 +165,26 @@ public sealed class DesktopHost : IDisposable
         get
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            return File.Exists(LoginTarget(root)) && string.Equals(key?.GetValue(identity) as string, StartupCommand(root), StringComparison.OrdinalIgnoreCase);
+            string? command = key?.GetValue(identity) as string, target = RegisteredLoginTarget(command);
+            if (target is null || !File.Exists(target)) return false;
+            string expected = Quote(target) + " --data-dir " + Quote(root) + " --login-startup";
+            return string.Equals(command, expected, StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(target, LoginTarget(root), StringComparison.OrdinalIgnoreCase) || HasNewerLoginTarget(command!));
         }
     }
-    public void RefreshLoginTarget() => RefreshLoginTarget(root);
     // Repair enabled entries only. The persistent copy survives cleanup of build directories.
     public static void RefreshLoginTarget(string dataRoot)
     {
         string entry = Identity(dataRoot);
-        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-        if (key?.GetValue(entry) is not string command || string.IsNullOrWhiteSpace(command)) return;
+        using (var existing = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+            if (existing?.GetValue(entry) is not string command || string.IsNullOrWhiteSpace(command) || HasNewerLoginTarget(command)) return;
         InstallLoginTarget(dataRoot);
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        if (key?.GetValue(entry) is not string current || string.IsNullOrWhiteSpace(current) || HasNewerLoginTarget(current)) return;
         string next = StartupCommand(dataRoot);
-        if (!string.Equals(command, next, StringComparison.OrdinalIgnoreCase)) key.SetValue(entry, next);
+        if (!string.Equals(current, next, StringComparison.OrdinalIgnoreCase)) key.SetValue(entry, next);
+        if (!File.Exists(LoginTarget(dataRoot)) || !string.Equals(key.GetValue(entry) as string, next, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("登录启动登记更新后核验失败，请重新开启登录启动。");
     }
     public void SetLogin(bool enabled)
     {

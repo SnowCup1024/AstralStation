@@ -25,8 +25,9 @@ public sealed partial class MainWindow : Window
     private string? loginError;
     private readonly Dictionary<long, FocusRequest> running = [];
     private sealed class FocusRequest(LaunchTask task) { public LaunchTask Task = task; public bool Minimized, Attempted; public double Deadline; }
-    public MainWindow(string dataRoot, bool paused, bool background, bool loginStartup)
+    public MainWindow(string dataRoot, bool paused, bool background, bool loginStartup, string? loginError = null)
     {
+        this.loginError = loginError;
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -53,7 +54,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9.3", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9.4", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -77,7 +78,6 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += async (_, _) =>
         {
-            try { desktop.RefreshLoginTarget(); } catch (Exception ex) { loginError = ex.Message; }
             session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize();
             if (!pages.TryGetValue("steam", out var steam)) pages["steam"] = steam = routes["steam"]();
             if (steam is SteamLaunchPage setup) await setup.ScanOnce();

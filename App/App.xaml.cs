@@ -23,16 +23,16 @@ public partial class App : Application
         int index = Array.IndexOf(arguments, "--data-dir");
         if (index >= 0 && index + 1 < arguments.Length) root = Path.GetFullPath(arguments[index + 1]);
         dataRoot = root;
-        if (arguments.Contains("--repair-login-startup"))
+        bool repairOnly = arguments.Contains("--repair-login-startup");
+        string? loginError = null;
+        // Update before single-instance routing: an existing window may prevent this launch from creating a new one.
+        try { DesktopHost.RefreshLoginTarget(root); }
+        catch (Exception ex)
         {
-            try { DesktopHost.RefreshLoginTarget(root); }
-            catch (Exception ex)
-            {
-                Environment.ExitCode = 1;
-                try { Directory.CreateDirectory(root); File.AppendAllText(Path.Combine(root, "startup-error.log"), DateTime.Now + "\n" + ex + "\n"); } catch { }
-            }
-            Exit(); return;
+            loginError = ex.Message;
+            try { Directory.CreateDirectory(root); File.AppendAllText(Path.Combine(root, "startup-error.log"), DateTime.Now + "\n" + ex + "\n"); } catch { }
         }
+        if (repairOnly) { if (loginError is not null) Environment.ExitCode = 1; Exit(); return; }
         mutex = new Mutex(true, "Local\\" + DesktopHost.Identity(root), out bool first);
         if (!first)
         {
@@ -49,7 +49,7 @@ public partial class App : Application
                 Thread.Sleep(150);
             }
         }
-        window = new MainWindow(root, arguments.Contains("--paused"), arguments.Contains("--background"), arguments.Contains("--login-startup"));
+        window = new MainWindow(root, arguments.Contains("--paused"), arguments.Contains("--background"), arguments.Contains("--login-startup"), loginError);
         window.Closed += (_, _) => { mutex.ReleaseMutex(); mutex.Dispose(); };
         window.Activate();
     }
