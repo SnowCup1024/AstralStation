@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private ContentDialog? completionDialog;
     private TextBlock? countdownText;
     private IDisposable? trayScope;
+    private string? loginError;
     private readonly Dictionary<long, FocusRequest> running = [];
     private sealed class FocusRequest(LaunchTask task) { public LaunchTask Task = task; public bool Minimized, Attempted; public double Deadline; }
     public MainWindow(string dataRoot, bool paused, bool background, bool loginStartup)
@@ -52,7 +53,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9.3", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -76,7 +77,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { closed = true; completionDialog?.Hide(); session.Dispose(); desktop.Dispose(); };
         Root.Loaded += async (_, _) =>
         {
-            try { desktop.RefreshLoginTarget(); } catch (Exception ex) { session.Store.Fail(ex.Message); }
+            try { desktop.RefreshLoginTarget(); } catch (Exception ex) { loginError = ex.Message; }
             session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize();
             if (!pages.TryGetValue("steam", out var steam)) pages["steam"] = steam = routes["steam"]();
             if (steam is SteamLaunchPage setup) await setup.ScanOnce();
@@ -129,7 +130,8 @@ public sealed partial class MainWindow : Window
             tray.SelectedIndex = session.Store.Settings.Tray ? 1 : 0;
             closeToTray.SelectedIndex = session.Store.Settings.CloseToTray ? 1 : 0;
             closeToTray.IsEnabled = session.Store.Settings.Tray;
-            login.SelectedIndex = desktop.LoginEnabled ? 1 : 0;
+            try { login.SelectedIndex = desktop.LoginEnabled ? 1 : 0; }
+            catch (Exception ex) { loginError = ex.Message; login.SelectedIndex = 0; }
             ready = true;
         }
         void Row(string label, FrameworkElement control)
@@ -143,6 +145,9 @@ public sealed partial class MainWindow : Window
         Row("全部任务完成并退出后", autoClose);
         launch.Children.Add(new TextBlock { Text = "全部任务完成并退出后，自动倒计时 15 秒。只有手动打开时发现今日任务已全部完成，才默认保持打开。任务运行中、记录保存失败或正在操作弹窗时不会退出。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         Row("允许托盘后台运行", tray); Row("关闭窗口时", closeToTray); Row("Windows 登录时启动", login);
+        var loginNotice = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Error };
+        launch.Children.Add(loginNotice);
+        void ShowLoginError() { loginNotice.Message = "登录启动未生效：" + loginError; loginNotice.IsOpen = loginError is not null; }
         async void Save(object sender, SelectionChangedEventArgs args)
         {
             if (!ready) return;
@@ -156,11 +161,11 @@ public sealed partial class MainWindow : Window
         login.SelectionChanged += async (_, _) =>
         {
             if (!ready) return;
-            try { desktop.SetLogin(login.SelectedIndex == 1); }
-            catch (Exception ex) { await dialogs.Error(ex.Message); }
-            finally { Sync(); }
+            try { desktop.SetLogin(login.SelectedIndex == 1); loginError = null; }
+            catch (Exception ex) { loginError = ex.Message; await dialogs.Error(ex.Message); }
+            finally { Sync(); ShowLoginError(); }
         };
-        Sync();
+        Sync(); ShowLoginError();
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = launch });
         var data = new StackPanel { Spacing = 12 };
         data.Children.Add(new TextBlock { Text = "本地数据", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
@@ -180,8 +185,8 @@ public sealed partial class MainWindow : Window
     {
         if (closed) return;
         if (session.Store.Tasks.Any(t => !session.Store.Done(t, DateTime.Now))) { completionEligible = true; keepOpen = false; }
+        if (running.Count == 0 && restoreAfterRuns) { restoreAfterRuns = false; desktop.Restore(); }
         if (session.Interacting || session.Store.Error is not null) { CancelCountdown(); return; }
-        if (running.Count == 0 && restoreAfterRuns && !CanClose) { restoreAfterRuns = false; desktop.Restore(); }
         foreach (var request in running.Values)
         {
             if (!request.Minimized) { request.Minimized = true; request.Deadline = Scheduler.Seconds + 15; restoreAfterRuns = true; desktop.Minimize(); }

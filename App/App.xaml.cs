@@ -23,6 +23,16 @@ public partial class App : Application
         int index = Array.IndexOf(arguments, "--data-dir");
         if (index >= 0 && index + 1 < arguments.Length) root = Path.GetFullPath(arguments[index + 1]);
         dataRoot = root;
+        if (arguments.Contains("--repair-login-startup"))
+        {
+            try { DesktopHost.RefreshLoginTarget(root); }
+            catch (Exception ex)
+            {
+                Environment.ExitCode = 1;
+                try { Directory.CreateDirectory(root); File.AppendAllText(Path.Combine(root, "startup-error.log"), DateTime.Now + "\n" + ex + "\n"); } catch { }
+            }
+            Exit(); return;
+        }
         mutex = new Mutex(true, "Local\\" + DesktopHost.Identity(root), out bool first);
         if (!first)
         {

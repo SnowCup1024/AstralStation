@@ -2,6 +2,7 @@ using AstralStation.Launch;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -130,20 +131,47 @@ public sealed class DesktopHost : IDisposable
         catch (Exception ex) { Debug.WriteLine("窗口消息处理失败：" + ex.Message); }
         return DefSubclassProc(hwnd, message, wParam, lParam);
     }
-    private string StartupCommand => Quote(Environment.ProcessPath!) + " --data-dir " + Quote(root) + " --login-startup";
-    public bool LoginEnabled { get { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue(identity) is string command && !string.IsNullOrWhiteSpace(command); } }
-    // The registration belongs to the data directory, not to a versioned EXE path.
-    // Only retarget an existing registration; a deleted/disabled entry stays disabled.
-    public void RefreshLoginTarget()
+    private static string LoginTarget(string dataRoot)
     {
+        string version = typeof(DesktopHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "current";
+        return Path.Combine(dataRoot, "Startup", version, "AstralStation.exe");
+    }
+    private static string StartupCommand(string dataRoot) => Quote(LoginTarget(dataRoot)) + " --data-dir " + Quote(dataRoot) + " --login-startup";
+    private static void InstallLoginTarget(string dataRoot)
+    {
+        string target = LoginTarget(dataRoot), source = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序位置。");
+        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(target) && new FileInfo(target).Length == new FileInfo(source).Length &&
+            string.Equals(FileVersionInfo.GetVersionInfo(target).ProductVersion, FileVersionInfo.GetVersionInfo(source).ProductVersion, StringComparison.Ordinal)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.Copy(source, temporary); File.Move(temporary, target, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+    public bool LoginEnabled
+    {
+        get
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            return File.Exists(LoginTarget(root)) && string.Equals(key?.GetValue(identity) as string, StartupCommand(root), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+    public void RefreshLoginTarget() => RefreshLoginTarget(root);
+    // Repair enabled entries only. The persistent copy survives cleanup of build directories.
+    public static void RefreshLoginTarget(string dataRoot)
+    {
+        string entry = Identity(dataRoot);
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-        if (key?.GetValue(identity) is string command && !string.IsNullOrWhiteSpace(command) && command != StartupCommand)
-            key.SetValue(identity, StartupCommand);
+        if (key?.GetValue(entry) is not string command || string.IsNullOrWhiteSpace(command)) return;
+        InstallLoginTarget(dataRoot);
+        string next = StartupCommand(dataRoot);
+        if (!string.Equals(command, next, StringComparison.OrdinalIgnoreCase)) key.SetValue(entry, next);
     }
     public void SetLogin(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if (enabled) key.SetValue(identity, StartupCommand); else key.DeleteValue(identity, false);
+        if (enabled) { InstallLoginTarget(root); key.SetValue(identity, StartupCommand(root)); }
+        else key.DeleteValue(identity, false);
     }
     public static string Quote(string value)
     {
