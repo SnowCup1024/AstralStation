@@ -733,8 +733,17 @@ internal sealed class SteamLaunchPage : Grid
     }
     private async Task Initialize(string? testData, string? testSteam)
     {
-        try { service = await Task.Run(() => new SteamLaunch(testData, testSteam)); }
-        catch (Exception ex) { Children.Add(notice); ShowNotice(ErrorMessage(ex), true); return; }
+        try { await InitializePage(testData, testSteam); }
+        catch (Exception ex)
+        {
+            initialized = false; Children.Clear();
+            Children.Add(new TextBlock { Text = "Steam 启动国服 · 无法加载页面", Margin = new Thickness(24), FontSize = 23 });
+            Children.Add(notice); ShowNotice(ErrorMessage(ex), true);
+        }
+    }
+    private async Task InitializePage(string? testData, string? testSteam)
+    {
+        service = await Task.Run(() => new SteamLaunch(testData, testSteam));
         Children.Add(new ScrollViewer { Content = page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         var heading = new Grid { ColumnSpacing = 16 };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -754,7 +763,11 @@ internal sealed class SteamLaunchPage : Grid
         games.ItemContainerStyle = tileStyle;
         tile.Child = tileContent; games.Items.Add(tile); page.Children.Add(games);
         form.Visibility = Visibility.Collapsed; formHost.Content = form; page.Children.Add(formHost);
-        games.ItemClick += async (_, _) => { games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName; await Run(() => Task.Run(service.EnsureScript)); await CheckVersion(); };
+        games.ItemClick += async (_, _) =>
+        {
+            games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName;
+            await Run(() => Task.Run(service.EnsureScript)); await CheckVersion();
+        };
         back.Click += (_, _) => ShowGames();
         ReloadSteamLocations();
         libraries.SizeChanged += (_, _) => { foreach (var label in libraryLabels) label.Width = Math.Max(80, libraries.ActualWidth - 64); };
@@ -795,6 +808,7 @@ internal sealed class SteamLaunchPage : Grid
         launching.Children.Add(Row("复制后在 Steam 游戏属性的启动选项中手动填写。启动脚本会自动生成。", Buttons(Guarded("复制", "runtime", async () => { await Task.Run(() => service.Apply(service.Prepare("runtime"))); Dialogs.Copy(service.LaunchOptions); })), actions: true));
         accounts.SelectionChanged += (_, _) => { if (initialized && !busy) { Pull(); Refresh(); } };
         libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); Refresh(); await CheckVersion(); } };
+        ActualThemeChanged += (_, _) => Refresh();
         initialized = true; Pull(); Refresh();
 
     }
@@ -829,7 +843,7 @@ internal sealed class SteamLaunchPage : Grid
     public void ShowGames()
     {
         games.Visibility = Visibility.Visible; form.Visibility = back.Visibility = Visibility.Collapsed;
-        title.Text = "Steam 启动国服"; notice.IsOpen = false;
+        title.Text = "Steam 启动国服"; if (initialized) notice.IsOpen = false;
     }
     private Task? startupScan;
     public Task ScanOnce() => startupScan ??= ScanPaths();
@@ -934,33 +948,39 @@ internal sealed class SteamLaunchPage : Grid
         return string.IsNullOrWhiteSpace(cause.Message) ? $"{cause.GetType().Name}（0x{cause.HResult:X8}）：操作失败。" : cause.Message;
     }
     private int operationRevision;
-    private readonly Dictionary<string, Task> versionChecks = new(StringComparer.OrdinalIgnoreCase);
-    private Task CheckVersion()
+    private readonly Dictionary<string, Task<bool>> versionChecks = new(StringComparer.OrdinalIgnoreCase);
+    private async Task CheckVersion()
     {
-        Pull();
-        string library = service.Config.Library;
-        if (versionChecks.TryGetValue(library, out var pending)) return pending;
-        var work = ReadVersion(service.Snapshot(), library);
-        versionChecks[library] = work;
-        return work;
+        try
+        {
+            Pull();
+            string library = service.Config.Library;
+            if (!Path.IsPathFullyQualified(library)) return;
+            if (!versionChecks.TryGetValue(library, out var work)) versionChecks[library] = work = ReadVersion(service.Snapshot(), library);
+            if (!await work && versionChecks.TryGetValue(library, out var current) && ReferenceEquals(current, work)) versionChecks.Remove(library);
+        }
+        catch (Exception ex) { ShowNotice(ErrorMessage(ex), true); }
     }
-    private async Task ReadVersion(SteamLaunch snapshot, string library)
+    private async Task<bool> ReadVersion(SteamLaunch snapshot, string library)
     {
         int revision = operationRevision;
         try
         {
             await Task.Run(async () => { if (File.Exists(snapshot.AcfPath)) await snapshot.Fetch(false); });
-            if (busy || revision != operationRevision || !string.Equals(service.Config.Library, library, StringComparison.OrdinalIgnoreCase)) return;
+            if (revision != operationRevision || !string.Equals(service.Config.Library, library, StringComparison.OrdinalIgnoreCase)) return false;
             service.UseVersion(snapshot); Refresh();
+            return true;
         }
         catch (Exception ex)
         {
-            if (form.Visibility == Visibility.Visible && !busy && service.Config.Library == library) ShowNotice(ErrorMessage(ex), true);
+            if (form.Visibility == Visibility.Visible && revision == operationRevision && service.Config.Library == library) ShowNotice(ErrorMessage(ex), true);
+            return false;
         }
     }
     private async Task Run(Func<Task> operation)
     {
         if (busy) return;
+        using var scope = dialogs.Interaction();
         operationRevision++;
         busy = true; formHost.IsEnabled = back.IsEnabled = false; notice.IsOpen = false;
         try { await operation(); }
@@ -993,7 +1013,7 @@ internal sealed class SteamLaunchPage : Grid
     {
         var grid = new Grid { ColumnSpacing = 8 };
         grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.Children.Add(new Border { Child = field, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"], Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] });
+        grid.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = field, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(8) });
         var actions = Buttons(buttons); Grid.SetColumn(actions, 1); grid.Children.Add(actions); return grid;
     }
     private Grid PathInput(PathLabel field, bool directory)
@@ -1021,7 +1041,7 @@ internal sealed class SteamLaunchPage : Grid
         content.Children.Add(new TextBlock { Text = title, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         var host = new ContentControl { Content = content, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         if (prerequisite is not null) { host.IsEnabled = false; host.Opacity = 0.4; steps.Add((host, prerequisite)); }
-        form.Children.Add(new Border { Child = host, Padding = new Thickness(16), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"], Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] });
+        form.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = host });
         return content;
     }
     private Button Guarded(string text, string action, Func<Task> operation)

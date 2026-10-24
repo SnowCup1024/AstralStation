@@ -43,6 +43,8 @@ public sealed partial class MainWindow : Window
         desktop = new(WinRT.Interop.WindowNative.GetWindowHandle(this), dataRoot);
         dialogs = new(this, Root, session);
         Root.RequestedTheme = session.Store.Settings.Theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
+        Root.ActualThemeChanged += (_, _) => UpdateCaptionTheme();
+        UpdateCaptionTheme();
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => launchPage = new(session, dialogs);
         routes["steam"] = () =>
@@ -54,7 +56,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.9.4", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.10", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -109,6 +111,18 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrEmpty(body)) content.Children.Add(new TextBlock { Text = body });
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = content });
         return panel;
+    }
+    private void UpdateCaptionTheme()
+    {
+        if (!AppWindowTitleBar.IsCustomizationSupported()) return;
+        bool dark = Root.ActualTheme == ElementTheme.Dark;
+        var foreground = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        var titleBar = AppWindow.TitleBar;
+        titleBar.ButtonBackgroundColor = titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        titleBar.ButtonForegroundColor = titleBar.ButtonHoverForegroundColor = titleBar.ButtonPressedForegroundColor = foreground;
+        titleBar.ButtonInactiveForegroundColor = dark ? Microsoft.UI.Colors.Gray : Microsoft.UI.Colors.DimGray;
+        titleBar.ButtonHoverBackgroundColor = dark ? Windows.UI.Color.FromArgb(32, 255, 255, 255) : Windows.UI.Color.FromArgb(24, 0, 0, 0);
+        titleBar.ButtonPressedBackgroundColor = dark ? Windows.UI.Color.FromArgb(48, 255, 255, 255) : Windows.UI.Color.FromArgb(40, 0, 0, 0);
     }
     private FrameworkElement Settings()
     {

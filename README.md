@@ -1,14 +1,14 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.9.4**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.10**，暂不添加许可证。
 
-Alpha 3.9.4 将登录启动登记更新提前到程序启动入口，已有实例阻止新版窗口打开时也会先更新登记；构建不再修改自启动设置。
+Alpha 3.10 修复 Steam 游戏入口闪退：系统游戏图标读取移到后台，避免页面加载期间的界面重入；任务队列与日历图标同步修复。补齐页面初始化错误处理，修复 ACF 版本检查失败后无法重试、Steam 卡片与标题栏按钮未跟随主题及日历错误信息换行的问题；Steam 配置操作期间暂停自动退出，避免中途退出打断文件写入。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含单文件：
 
-`.build/Alpha-3.9.4/AstralStation.exe`
+`.build/Alpha-3.10/AstralStation.exe`
 
 Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK。
 

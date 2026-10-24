@@ -10,6 +10,7 @@ namespace AstralStation.Services;
 public sealed class Dialogs(Window window, FrameworkElement root, LaunchSession session)
 {
     public bool Busy { get; private set; }
+    public IDisposable Interaction() => session.Interaction();
     public async Task<ContentDialogResult> Show(ContentDialog dialog, bool expand = false)
     {
         if (Busy) return ContentDialogResult.None;

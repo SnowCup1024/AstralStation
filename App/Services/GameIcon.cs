@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
 using Windows.Storage.FileProperties;
+using Windows.Storage.Streams;
 
 namespace AstralStation.Services;
 
@@ -99,11 +100,27 @@ internal static class GameIconLoader
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 128, ThumbnailOptions.UseCurrentScale);
-            if (thumbnail is null || thumbnail.Size == 0) return null;
+            // Shell activation can pump STA messages before its first await. Keep it out of
+            // Loaded/layout callbacks, where nested XAML dispatch causes a native fail-fast.
+            var bytes = await Task.Run(async () =>
+            {
+                var file = await StorageFile.GetFileFromPathAsync(path);
+                using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 128, ThumbnailOptions.None);
+                if (thumbnail is null || thumbnail.Size == 0 || thumbnail.Size > 4 * 1024 * 1024) return null;
+                using var reader = new DataReader(thumbnail.GetInputStreamAt(0));
+                uint count = (uint)thumbnail.Size;
+                if (await reader.LoadAsync(count) != count) return null;
+                var result = new byte[count]; reader.ReadBytes(result); return result;
+            });
+            if (bytes is null) return null;
+            using var stream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
+            {
+                writer.WriteBytes(bytes); await writer.StoreAsync();
+            }
+            stream.Seek(0);
             var image = new BitmapImage();
-            await image.SetSourceAsync(thumbnail);
+            await image.SetSourceAsync(stream);
             return image;
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"图标加载失败：{path} · {ex.Message}"); return null; }

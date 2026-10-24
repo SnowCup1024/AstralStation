@@ -122,7 +122,7 @@ public sealed class HistoryView : Grid
         {
             var result = session.Store.HistoryDates();
             available = result.Dates.Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).ToList();
-            notice.Text = result.Errors.Count == 0 ? "" : "部分记录无法读取：\\n" + string.Join("\\n", result.Errors);
+            notice.Text = result.Errors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", result.Errors);
             if (revision < 0)
             {
                 selected = DateTime.Today.ToString("yyyy-MM-dd");
