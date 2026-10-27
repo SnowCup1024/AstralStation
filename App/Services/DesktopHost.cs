@@ -133,8 +133,7 @@ public sealed class DesktopHost : IDisposable
     }
     private static string LoginTarget(string dataRoot)
     {
-        string version = typeof(DesktopHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "current";
-        return Path.Combine(dataRoot, "Startup", version, "AstralStation.exe");
+        return AppUpdates.InstalledExe ?? throw new InvalidOperationException("请先使用安装器安装星间驿站，再开启 Windows 登录启动。");
     }
     private static string StartupCommand(string dataRoot) => Quote(LoginTarget(dataRoot)) + " --data-dir " + Quote(dataRoot) + " --login-startup";
     private static string? RegisteredLoginTarget(string? command)
@@ -149,24 +148,13 @@ public sealed class DesktopHost : IDisposable
         return target is not null && File.Exists(target) && CompareVersions(FileVersionInfo.GetVersionInfo(target).ProductVersion,
             typeof(DesktopHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion) > 0;
     }
-    private static void InstallLoginTarget(string dataRoot)
-    {
-        string target = LoginTarget(dataRoot), source = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前程序位置。");
-        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return;
-        if (File.Exists(target) && new FileInfo(target).Length == new FileInfo(source).Length &&
-            string.Equals(FileVersionInfo.GetVersionInfo(target).ProductVersion, FileVersionInfo.GetVersionInfo(source).ProductVersion, StringComparison.Ordinal)) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { File.Copy(source, temporary); File.Move(temporary, target, true); }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
     public bool LoginEnabled
     {
         get
         {
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
             string? command = key?.GetValue(identity) as string, target = RegisteredLoginTarget(command);
-            if (target is null || !File.Exists(target)) return false;
+            if (target is null || !File.Exists(target) || !AppUpdates.Installed) return false;
             string expected = Quote(target) + " --data-dir " + Quote(root) + " --login-startup";
             return string.Equals(command, expected, StringComparison.OrdinalIgnoreCase) &&
                 (string.Equals(target, LoginTarget(root), StringComparison.OrdinalIgnoreCase) || HasNewerLoginTarget(command!));
@@ -175,10 +163,10 @@ public sealed class DesktopHost : IDisposable
     // Repair enabled entries only. The persistent copy survives cleanup of build directories.
     public static void RefreshLoginTarget(string dataRoot)
     {
+        if (!AppUpdates.Installed) return;
         string entry = Identity(dataRoot);
         using (var existing = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
             if (existing?.GetValue(entry) is not string command || string.IsNullOrWhiteSpace(command) || HasNewerLoginTarget(command)) return;
-        InstallLoginTarget(dataRoot);
         using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
         if (key?.GetValue(entry) is not string current || string.IsNullOrWhiteSpace(current) || HasNewerLoginTarget(current)) return;
         string next = StartupCommand(dataRoot);
@@ -189,8 +177,16 @@ public sealed class DesktopHost : IDisposable
     public void SetLogin(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if (enabled) { InstallLoginTarget(root); key.SetValue(identity, StartupCommand(root)); }
+        if (enabled) key.SetValue(identity, StartupCommand(root));
         else key.DeleteValue(identity, false);
+    }
+    public static void RemoveDefaultLogin()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        foreach (var name in key?.GetValueNames() ?? [])
+            if (name.StartsWith("AstralStation-", StringComparison.Ordinal) &&
+                string.Equals(RegisteredLoginTarget(key!.GetValue(name) as string), AppUpdates.InstalledExe, StringComparison.OrdinalIgnoreCase))
+                key.DeleteValue(name, false);
     }
     public static string Quote(string value)
     {

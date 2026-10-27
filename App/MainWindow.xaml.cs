@@ -56,7 +56,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 3.10", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 4.0", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -130,6 +130,12 @@ public sealed partial class MainWindow : Window
         var theme = new ComboBox { Header = "应用主题", ItemsSource = new[] { "跟随系统", "浅色", "深色" }, SelectedIndex = (int)Root.RequestedTheme, MinWidth = 240 };
         theme.SelectionChanged += async (_, _) => { try { var next = session.Store.Settings.Clone(); next.Theme = theme.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "Default" }; session.Store.SaveSettings(next); Root.RequestedTheme = (ElementTheme)theme.SelectedIndex; } catch (Exception ex) { await dialogs.Error(ex.Message); } };
         ((StackPanel)((Border)panel.Children[1]).Child).Children.Add(theme);
+        panel.Children.Add(AppUpdates.Card(session, dialogs, () =>
+        {
+            if (session.Store.Error is not null || session.Scheduler.Launching) throw new InvalidOperationException("任务记录保存失败或正在启动，请稍后更新。");
+            session.Scheduler.SaveHandoff();
+            return Task.CompletedTask;
+        }));
         var launch = new StackPanel { Spacing = 12 };
         launch.Children.Add(new TextBlock { Text = "启动管理", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
         var autoClose = new ComboBox { ItemsSource = new[] { "保持打开", "倒计时 15 秒后退出" }, Width = 220 };

@@ -1,16 +1,18 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 3.10**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 4.0**，暂不添加许可证。
 
-Alpha 3.10 修复 Steam 游戏入口闪退：系统游戏图标读取移到后台，避免页面加载期间的界面重入；任务队列与日历图标同步修复。补齐页面初始化错误处理，修复 ACF 版本检查失败后无法重试、Steam 卡片与标题栏按钮未跟随主题及日历错误信息换行的问题；Steam 配置操作期间暂停自动退出，避免中途退出打断文件写入。
+Alpha 4.0 使用 [Velopack](https://docs.velopack.io/) 统一处理安装、卸载和更新。应用改为目录部署，设置提供 GitHub Alpha 通道检查更新及本地更新目录；更新前保存任务交接，游戏继续运行。
 
 ## 构建与运行
 
-需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含单文件：
+需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含应用目录及安装器、更新包：
 
-`.build/Alpha-3.10/AstralStation.exe`
+`.build/Alpha-4.0/Installer/SnowCup1024.AstralStation-alpha-Setup.exe`
 
-Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK。
+`Installer` 中的 Setup.exe 用于安装，`*-full.nupkg` 与 `releases.alpha.json` 用于更新；`App/AstralStation.exe` 供开发调试。默认按用户安装到 `%LOCALAPPDATA%/SnowCup1024.AstralStation`，数据目录保持不变，卸载保留用户数据。无需另装 .NET 或 Windows App SDK。安装器尚未签名。
+
+发布更新时将当前 Installer 内的 Setup、full.nupkg、releases.alpha.json 上传至同一 GitHub 预发布 Release；源码推送不等于发布二进制更新。公共仓库更新源无需在客户端保存令牌，也支持选择本地更新目录离线更新。构建工具与 SDK 均锁定 Velopack 1.3.39-g8d2844f。
 
 
 
@@ -27,7 +29,7 @@ Windows x64，Windows 10 1809 及以上；无需另装 .NET 或 Windows App SDK�
 
 数据保存在 `%LOCALAPPDATA%\AstralStation\Launch`，包含任务、设置、完成状态和历史 JSON，以及 `.bak` 备份。`--paused` 暂停启动，`--data-dir "路径"` 指定独立数据目录，`--background` 在开启托盘时后台启动。Windows 登录启动会自动携带 `--login-startup` 来源标记。
 
-开启 Windows 登录启动时，程序副本保存在数据目录的 `Startup/<程序版本>/AstralStation.exe`，不受构建目录清理影响。每次打开新版都会在检查已有实例、创建窗口之前更新并核验启动登记；较旧版本不会覆盖已登记的更新版本。构建只生成程序，关闭的启动项不会被自动开启；也可用 `--repair-login-startup` 单独修复已有登记。设置仅在有效的当前或更新版本启动登记存在时显示开启；修复失败会显示原因，不会因此停止任务队列。
+开启 Windows 登录启动需要先安装，启动登记指向安装器维护的固定 `current/AstralStation.exe`；打开安装版时自动迁移原有的已开启登记，关闭的登记不会被开启。构建不修改启动项，开发目录运行不迁移启动项。更新会替换 current 内容，不再复制单个 EXE。卸载移除默认数据目录的应用启动项，保留数据。
 
 游戏运行期间由工具自动最小化的窗口，会在游戏结束后自动恢复。启用倒计时退出时，最后一个游戏结束后同样先恢复窗口，再显示 15 秒退出倒计时。只有手动打开时发现今日任务已全部完成，才默认保持打开；Windows 登录自动启动时即使任务已完成也会倒计时。重置进度或再次运行任务后，完成时重新启用倒计时；弹窗中的“保持打开”仅对本次完成生效。还有运行任务、正在操作弹窗或记录保存失败时不会自动退出。
 
