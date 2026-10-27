@@ -14,6 +14,8 @@ public sealed class MonitorSettings : UserControl
     private readonly StackPanel games = new() { Spacing = 8 };
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
     private readonly ToggleSwitch enabled = new() { Header = "持续后台监测", OffContent = "关闭", OnContent = "开启" };
+    private readonly ToggleSwitch steamLink = new() { Header = "终末地 Steam 时长联动", OffContent = "关闭", OnContent = "开启" };
+    private readonly TextBlock steamState = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
     private bool busy, syncing;
     public MonitorSettings(string root, Dialogs dialogs, MonitorClient client)
     {
@@ -23,6 +25,19 @@ public sealed class MonitorSettings : UserControl
         panel.Children.Add(new TextBlock { Text = "实时进程监测", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
         panel.Children.Add(new TextBlock { Text = "只监测你明确添加的游戏，每秒检查完整路径和进程身份。关闭主应用后继续记录，启用后随 Windows 登录启动；不会启动或关闭游戏，也不改变今日任务进度。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(enabled); panel.Children.Add(status);
+        panel.Children.Add(steamLink);
+        panel.Children.Add(new TextBlock { Text = "需先手动加入实际 Endfield.exe，并在 Steam 粘贴新版启动选项。开启后，其他入口启动终末地也会唤起 Steam；无窗口等待进程跟随游戏结束。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(steamState);
+        var cancelSteam = new Button { Content = "取消 Steam 启动等待" };
+        cancelSteam.Click += async (_, _) => await Guard(async () =>
+        {
+            string path = MonitorData.ReadConfig(root).SteamLinkConfigPath;
+            if (string.IsNullOrWhiteSpace(path)) path = SteamConfigPath();
+            var result = await SteamBridge.Query(path, cancelWaiting: true);
+            if (result is null) throw new InvalidOperationException("当前没有新版 Steam 等待进程。");
+            if (result.SeenGame || result.State != "已取消启动等待") throw new InvalidOperationException("游戏正在运行，不能取消计时等待。游戏退出后等待进程会自行结束。");
+        });
+        panel.Children.Add(cancelSteam);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var add = new Button { Content = "手动添加" }; var recommend = new Button { Content = "推荐添加" }; var check = new Button { Content = "检查并恢复后台" };
         actions.Children.Add(add); actions.Children.Add(recommend); actions.Children.Add(check); panel.Children.Add(actions); panel.Children.Add(games);
@@ -30,7 +45,34 @@ public sealed class MonitorSettings : UserControl
         recommend.Click += async (_, _) => await Guard(Recommend);
         check.Click += async (_, _) => await Guard(async () => { client.RegisterLogin(); await client.EnsureStarted(); });
         enabled.Toggled += async (_, _) => { if (!syncing) await Guard(() => client.SetEnabled(enabled.IsOn)); };
+        steamLink.Toggled += async (_, _) =>
+        {
+            if (syncing) return;
+            await Guard(async () =>
+            {
+                var config = MonitorData.ReadConfig(root);
+                if (steamLink.IsOn)
+                {
+                    if (!config.Enabled) throw new InvalidOperationException("请先开启持续后台监测。");
+                    string path = SteamConfigPath();
+                    var setup = new SteamLaunch(Path.GetDirectoryName(path));
+                    if (!setup.Configured()) throw new InvalidOperationException("请先完成 Steam 启动国服配置，并把新版启动选项粘贴到 Steam 游戏属性。");
+                    var runtime = SteamRuntime.Read(path);
+                    if (!config.Games.Any(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase) && g.ProcessName.Equals("Endfield", StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException("请先手动添加国服实际 Endfield.exe，进程名称填写 Endfield。");
+                    config.SteamLinkConfigPath = path;
+                }
+                config.SteamLinkEnabled = steamLink.IsOn;
+                MonitorData.SaveConfig(root, config); await client.EnsureStarted();
+            });
+        };
         Loaded += async (_, _) => await Refresh();
+    }
+    private string SteamConfigPath()
+    {
+        var arguments = Environment.GetCommandLineArgs();
+        return arguments.Contains("--steam-root") && arguments.Contains("--data-dir")
+            ? Path.Combine(root, "SteamLaunch", SteamBridge.AppId, "config.json") : SteamBridge.DefaultConfigPath;
     }
     private async Task Guard(Func<Task> action)
     {
@@ -45,7 +87,7 @@ public sealed class MonitorSettings : UserControl
         syncing = true;
         try
         {
-            var config = MonitorData.ReadConfig(root); enabled.IsOn = config.Enabled; games.Children.Clear();
+            var config = MonitorData.ReadConfig(root); enabled.IsOn = config.Enabled; steamLink.IsOn = config.SteamLinkEnabled; steamLink.IsEnabled = config.Enabled; games.Children.Clear();
             if (config.Games.Count == 0) games.Children.Add(new TextBlock { Text = "尚未添加监测对象。推荐结果也需手动选择确认，才会加入清单。", TextWrapping = TextWrapping.Wrap });
             foreach (var game in config.Games)
             {
@@ -72,6 +114,8 @@ public sealed class MonitorSettings : UserControl
             var state = await client.Status();
             status.Text = state is null ? config.Enabled ? "已启用，但后台未运行。可点击“检查并恢复后台”。" : "后台监测已关闭。清单保留，启用后开始记录。"
                 : state.Error ?? $"后台独立运行中 · 正在监测 {state.ActiveCount} 个进程 · {state.UpdatedAt:HH:mm:ss} 检查";
+            steamState.Text = !config.Enabled ? "后台关闭期间不发起 Steam 请求，已有等待进程仍会跟随游戏结束。"
+                : state?.SteamLinkState ?? (config.SteamLinkEnabled ? "联动已开启，可点击检查后台状态刷新。" : "联动关闭，仅记录本地运行历史。");
         }
         catch (Exception ex) { status.Text = ex.Message; }
         finally { syncing = false; }

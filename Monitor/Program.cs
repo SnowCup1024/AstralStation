@@ -7,6 +7,15 @@ using System.Text;
 using System.Text.Json;
 
 string[] arguments = Environment.GetCommandLineArgs();
+if (arguments.Contains("--steam-bridge"))
+{
+    int configAt = Array.IndexOf(arguments, "--config");
+    if (configAt < 0 || configAt + 1 >= arguments.Length) { Environment.ExitCode = 1; return; }
+    string config = Path.GetFullPath(arguments[configAt + 1]);
+    try { await new SteamSession(config).Run(); }
+    catch (Exception ex) { SteamBridge.ReportError(config, ex); Environment.ExitCode = 1; }
+    return;
+}
 int at = Array.IndexOf(arguments, "--data-dir");
 string root = at >= 0 && at + 1 < arguments.Length ? Path.GetFullPath(arguments[at + 1]) : MonitorData.DefaultRoot;
 string identity = MonitorData.Identity(root);
@@ -49,11 +58,12 @@ internal sealed class MonitorEngine(string root)
     private List<MonitorRecord> active = [];
     private DateTimeOffset checkpoint;
     private bool loaded, recovered;
+    private readonly SteamLinkController steam = new();
     private readonly int sessionId = CurrentSession();
     private static int CurrentSession() { using var current = Process.GetCurrentProcess(); return current.SessionId; }
     public string? Error { get; set; }
     private readonly string version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
-    public MonitorStatus Status => new(version, Environment.ProcessId, DateTimeOffset.Now, active.Count, Error);
+    public MonitorStatus Status => new(version, Environment.ProcessId, DateTimeOffset.Now, active.Count, Error, steam.State);
     public async Task Run(CancellationToken cancellation)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -76,7 +86,7 @@ internal sealed class MonitorEngine(string root)
                     }
                     var config = MonitorData.ReadConfig(root);
                     if (!config.Enabled) break;
-                    Tick(config); Error = null;
+                    await Tick(config); Error = null;
                 }
                 catch (Exception ex) { Error = "监测暂停，可在设置检查数据或权限：" + ex.Message; }
             } while (await timer.WaitForNextTickAsync(cancellation));
@@ -92,7 +102,7 @@ internal sealed class MonitorEngine(string root)
             }
         }
     }
-    private void Tick(MonitorConfig config)
+    private async Task Tick(MonitorConfig config)
     {
         var now = DateTimeOffset.Now;
         var found = new Dictionary<(string Game, int Pid, long Created), MonitorGame>();
@@ -137,6 +147,7 @@ internal sealed class MonitorEngine(string root)
         }
         recovered = true;
         if (changed || now - checkpoint >= TimeSpan.FromSeconds(10)) Checkpoint();
+        await steam.Tick(config, found.Values.ToArray(), uncertain.Contains("Endfield"), now);
         if (uncertain.Count > 0) throw new IOException("无法确认进程路径或身份：" + string.Join("、", uncertain) + "。不会误记为游戏退出。");
     }
     private void Finish(MonitorRecord record, DateTimeOffset end, string reason)

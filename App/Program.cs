@@ -16,7 +16,11 @@ internal static class Program
                 new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
                 Services.MonitorClient.RemoveLogin(); Services.DesktopHost.RemoveDefaultLogin();
             })
-            .OnBeforeUpdateFastCallback(_ => new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult())
+            .OnBeforeUpdateFastCallback(_ =>
+            {
+                Monitoring.SteamBridge.RequireIdle();
+                new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
+            })
             .Run();
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>

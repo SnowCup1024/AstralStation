@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
+using AstralStation.Monitoring;
 #if !STEAM_TEST
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,6 +31,8 @@ internal sealed class SteamLaunch
         public string GameDirectory { get; set; } = "";
         public string Arguments { get; set; } = "--game=endfield --reason=4";
         public int ExitGraceSeconds { get; set; } = 8;
+        public int WaitForGameSeconds { get; set; } = 600;
+        public string BridgeExecutable { get; set; } = "";
         public bool CloseOwnedLauncher { get; set; } = true;
         public Settings Clone() => (Settings)MemberwiseClone();
     }
@@ -76,13 +79,14 @@ internal sealed class SteamLaunch
     public string ExePath => Under(Config.Library, "steamapps", "common", Latest?.InstallDir ?? InstalledDirectory(), Latest?.Executable ?? "Endfield.exe");
     public string LocalConfigPath => Under(SteamRoot, "userdata", AccountId(Config.Account), "config", "localconfig.vdf");
     public static string PowerShellPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
-    public string LaunchOptions => $"\"{PowerShellPath}\" -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{ScriptPath}\" %command%";
+    public string LaunchOptions => SteamBridge.Options(Config.BridgeExecutable, ConfigPath);
     private static readonly string[] OptionKeys = ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps", AppId, "LaunchOptions"];
     public SteamLaunch(string? root = null, string? steamRoot = null, Action? checkSteamClosed = null)
     {
         this.checkSteamClosed = checkSteamClosed ?? SteamClosed;
         Root = CanonicalPath(root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AstralStation", "SteamLaunch", AppId));
         Config = File.Exists(ConfigPath) ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(ConfigPath), Json) ?? new() : new();
+        Config.BridgeExecutable = SteamBridge.ExecutablePath;
         Config.Launcher = CanonicalPath(Config.Launcher); Config.GameDirectory = CanonicalPath(Config.GameDirectory);
         Config.Library = CanonicalPath(Config.Library);
         SetSteamRoot(steamRoot ?? (string.IsNullOrWhiteSpace(Config.SteamPath) ? DetectSteam().FirstOrDefault() ?? "" : Config.SteamPath));
@@ -276,7 +280,8 @@ internal sealed class SteamLaunch
         }
         if (!Path.GetFileName(Config.Launcher).Equals("Launcher.exe", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("请选择鹰角官方启动器 Launcher.exe。");
         if (Config.GameDirectory.Split('\\', '/').Contains("steamapps", StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("请选择国服游戏目录，不能使用 Steam 游戏目录。");
-        if (Config.Arguments.Any(c => c is '\r' or '\n' or '\0') || Config.ExitGraceSeconds is < 2 or > 60) throw new InvalidOperationException("脚本参数无效；退出等待应为 2–60 秒。");
+        if (Config.Arguments.Any(c => c is '\r' or '\n' or '\0') || Config.ExitGraceSeconds is < 2 or > 60 || Config.WaitForGameSeconds is < 60 or > 3600) throw new InvalidOperationException("启动参数无效；退出等待应为 2–60 秒，游戏启动等待应为 60–3600 秒。");
+        if (!File.Exists(Config.BridgeExecutable)) throw new FileNotFoundException("无窗口 Steam 等待程序缺失，请重新安装星间驿站。", Config.BridgeExecutable);
     }
     internal SteamLaunch Snapshot()
     {
@@ -392,6 +397,7 @@ internal sealed class SteamLaunch
             }
             if (action is "all" or "acf" or "runtime")
             {
+                SteamBridge.RequireIdle();
                 ValidatePaths();
                 FileChange(ConfigPath, Utf8(JsonSerializer.Serialize(Config, Json)), "config", $"保存启动设置\n官方启动器：{Config.Launcher}\n国服目录：{Config.GameDirectory}\n启动参数：{Config.Arguments}\n退出等待：{Config.ExitGraceSeconds} 秒\n关闭本次新开的启动器：{(Config.CloseOwnedLauncher ? "开启" : "关闭")}");
             }
@@ -407,6 +413,7 @@ internal sealed class SteamLaunch
     }
     public void Apply(Plan plan)
     {
+        if (plan.Changes.Any(c => c.Path.Equals(ConfigPath, StringComparison.OrdinalIgnoreCase))) SteamBridge.RequireIdle();
         if (plan.Changes.Any(c => c.Path.EndsWith(".vdf", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("禁止写入 Steam 账号配置；启动选项只能复制后手动填写。");
         if (plan.Changes.Any(c => c.Path.EndsWith(".acf", StringComparison.OrdinalIgnoreCase))) checkSteamClosed();
@@ -451,8 +458,8 @@ internal sealed class SteamLaunch
     {
         try
         {
-            ValidatePaths(); var receipt = ReadReceipt();
-            return receipt.Files.Any(f => f.Kind == "script") && File.Exists(ExePath) && File.Exists(AcfPath) && File.Exists(ScriptPath) && File.Exists(ConfigPath) && File.ReadAllText(ConfigPath) == JsonSerializer.Serialize(Config, Json) && CurrentOptions() == LaunchOptions && ReadAcf().Get("StateFlags") == "4";
+            ValidatePaths(); _ = ReadReceipt();
+            return File.Exists(ExePath) && File.Exists(AcfPath) && File.Exists(ConfigPath) && File.ReadAllText(ConfigPath) == JsonSerializer.Serialize(Config, Json) && CurrentOptions() == LaunchOptions && ReadAcf().Get("StateFlags") == "4";
         }
         catch { return false; }
     }
@@ -590,108 +597,21 @@ internal sealed class SteamLaunch
     }
 
     public const string Script = """
-# 星间驿站 · Steam 启动国服 · Alpha 3.0
-# Steam 的 %command% 位于 $args 中，故意忽略，不执行占位 EXE。
+# 星间驿站 · Steam 启动国服 · Alpha 10.0 兼容入口
+# 新版 Steam 启动选项直接运行 WinExe；本文件仅供兼容调用，不执行 %command%。
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$mutex = [Threading.Mutex]::new($false, 'Local\AstralStation.SteamLaunch.4732690')
-$locked = $false
-$tray = $null
-$ownedLauncher = $null
-$gamePath = $null
-function Find-ExactProcess([string]$path) {
-    $name = [IO.Path]::GetFileNameWithoutExtension($path)
-    foreach ($p in [Diagnostics.Process]::GetProcessesByName($name)) {
-        try {
-            if ([string]::Equals($p.MainModule.FileName, $path, [StringComparison]::OrdinalIgnoreCase)) {
-                $p
-            } else { $p.Dispose() }
-        } catch {
-            $gone = $false
-            try { $gone = $p.HasExited } catch { $gone = $true }
-            $p.Dispose()
-            if (-not $gone) { throw '无法读取游戏或启动器进程路径，请让 Steam 与官方启动器使用相同权限。' }
-        }
-    }
-}
-
-
+$configPath = Join-Path $PSScriptRoot 'config.json'
 try {
-    try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
-    if (-not $locked) { throw '终末地的 Steam 启动监测已经运行，请查看系统托盘。' }
-    $configPath = Join-Path $PSScriptRoot 'config.json'
     $cfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $launcherPath = [IO.Path]::GetFullPath($cfg.Launcher)
-    $gamePath = [IO.Path]::GetFullPath((Join-Path $cfg.GameDirectory 'Endfield.exe'))
-    foreach ($path in @($launcherPath, $gamePath)) {
-        if (-not [IO.File]::Exists($path) -or (Get-Item -LiteralPath $path).Length -eq 0) {
-            throw "程序不存在或为空：$path"
-        }
+    $bridge = [string]$cfg.BridgeExecutable
+    if (-not [IO.Path]::IsPathRooted($bridge) -or -not [IO.File]::Exists($bridge)) {
+        throw '无窗口等待程序未配置，请重新复制新版 Steam 启动选项。'
     }
-    $grace = [int]$cfg.ExitGraceSeconds
-    if ($grace -lt 2 -or $grace -gt 60) { throw '退出等待必须在 2–60 秒之间。' }
-    $tray = [Windows.Forms.NotifyIcon]::new()
-    $tray.Icon = [Drawing.SystemIcons]::Application
-    $tray.Text = '终末地 · 等待游戏启动'
-    $menu = [Windows.Forms.ContextMenuStrip]::new()
-    $cancel = $menu.Items.Add('取消等待')
-    $script:cancelled = $false
-    $cancel.add_Click({ $script:cancelled = $true })
-    $tray.ContextMenuStrip = $menu
-    $tray.Visible = $true
-    $running = @(Find-ExactProcess $gamePath)
-    if ($running.Count -eq 0) {
-        $previous = @(Find-ExactProcess $launcherPath)
-        $hadLauncher = $previous.Count -gt 0
-        foreach ($p in $previous) { $p.Dispose() }
-        $start = [Diagnostics.ProcessStartInfo]::new()
-        $start.FileName = $launcherPath
-        $start.WorkingDirectory = [IO.Path]::GetDirectoryName($launcherPath)
-        $start.Arguments = [string]$cfg.Arguments
-        $start.UseShellExecute = $true
-        $started = [Diagnostics.Process]::Start($start)
-        if (-not $hadLauncher) { $ownedLauncher = $started }
-        elseif ($null -ne $started) { $started.Dispose() }
-    }
-    foreach ($p in $running) { $p.Dispose() }
-    $seen = $false
-    $absent = $null
-    while (-not $script:cancelled) {
-        [Windows.Forms.Application]::DoEvents()
-        $running = @(Find-ExactProcess $gamePath)
-        if ($running.Count -gt 0) {
-            $seen = $true
-            $absent = $null
-            $cancel.Enabled = $false
-            $tray.Text = '终末地 · 游戏运行中'
-        } elseif ($seen) {
-            if ($null -eq $absent) { $absent = [Diagnostics.Stopwatch]::StartNew() }
-            $tray.Text = '终末地 · 等待游戏退出确认'
-            if ($absent.Elapsed.TotalSeconds -ge $grace) { break }
-        }
-        foreach ($p in $running) { $p.Dispose() }
-        Start-Sleep -Milliseconds 500
-    }
+    & $bridge --steam-bridge --config $configPath
+    exit $LASTEXITCODE
 } catch {
-    [Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Steam 启动国服', 'OK', 'Error') | Out-Null
-} finally {
-    if ($null -ne $ownedLauncher) {
-        try {
-            $remaining = @(Find-ExactProcess $gamePath)
-            if ($cfg.CloseOwnedLauncher -and $remaining.Count -eq 0 -and -not $ownedLauncher.HasExited) {
-                # 仅结束本脚本新建且仍由此进程句柄指向的启动器，不结束游戏或原已运行的启动器。
-                if (-not $ownedLauncher.CloseMainWindow() -or -not $ownedLauncher.WaitForExit(3000)) {
-                    $ownedLauncher.Kill()
-                }
-            }
-            foreach ($p in $remaining) { $p.Dispose() }
-        } catch { }
-        $ownedLauncher.Dispose()
-    }
-    if ($null -ne $tray) { $tray.Visible = $false; $tray.Dispose(); $menu.Dispose() }
-    if ($locked) { $mutex.ReleaseMutex() }
-    $mutex.Dispose()
+    [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'bridge-error.log'), $_.Exception.Message + [Environment]::NewLine)
+    exit 1
 }
 """;
 }
@@ -805,7 +725,10 @@ internal sealed class SteamLaunchPage : Grid
         manifest.Children.Add(Row(acfState, Buttons(Guarded("获取最新数据并生成", "generate", async () => { Pull(); await service.Fetch(); ShowNotice("已生成 ACF 待应用内容，尚未修改 Steam 文件。", false); }), applyAcf), actions: true));
         var launching = Card("4 · Steam 启动选项", "runtime");
         launching.Children.Add(Row("Steam 启动选项", options));
-        launching.Children.Add(Row("复制后在 Steam 游戏属性的启动选项中手动填写。启动脚本会自动生成。", Buttons(Guarded("复制", "runtime", async () => { await Task.Run(() => service.Apply(service.Prepare("runtime"))); Dialogs.Copy(service.LaunchOptions); })), actions: true));
+        launching.Children.Add(Row("复制后在 Steam 游戏属性中替换旧启动选项。新版直接运行无窗口等待程序，已有脚本保留。", Buttons(Guarded("复制", "runtime", async () =>
+        {
+            if (await Change("runtime")) { Dialogs.Copy(service.LaunchOptions); ShowNotice("已复制新版无窗口启动选项，请在 Steam 游戏属性中手动替换。", false); }
+        })), actions: true));
         accounts.SelectionChanged += (_, _) => { if (initialized && !busy) { Pull(); Refresh(); } };
         libraries.SelectionChanged += async (_, _) => { if (initialized && !busy) { Pull(); Refresh(); await CheckVersion(); } };
         ActualThemeChanged += (_, _) => Refresh();
@@ -1103,7 +1026,7 @@ internal sealed class SteamLaunchPage : Grid
         }
         return content;
     }
-    private async Task Change(string action)
+    private async Task<bool> Change(string action)
     {
         Pull(); service.Require(action);
         if (action == "exe" && service.Latest is null) await service.Fetch(false);
@@ -1111,14 +1034,15 @@ internal sealed class SteamLaunchPage : Grid
         if (action == "exe")
         {
             await Task.Run(() => service.Apply(plan));
-            ShowNotice("已生成空 EXE 文件：" + service.ExePath, false); return;
+            ShowNotice("已生成空 EXE 文件：" + service.ExePath, false); return true;
         }
-        if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return; }
+        if (string.IsNullOrEmpty(plan.Description)) { ShowNotice("配置已经一致，无需修改。", false); return true; }
         var text = Preview(plan);
         var dialog = new ContentDialog { Title = "应用配置 · 变更预览", Content = new ScrollViewer { Content = text }, PrimaryButtonText = "确认应用", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
-        if (await dialogs.Show(dialog, expand: true) != ContentDialogResult.Primary) return;
+        if (await dialogs.Show(dialog, expand: true) != ContentDialogResult.Primary) return false;
         await Task.Run(() => service.Apply(plan));
         ShowNotice("文件配置已应用。请复制启动选项并在 Steam 中手动填写。", false);
+        return true;
     }
 }
 #endif

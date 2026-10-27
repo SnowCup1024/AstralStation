@@ -25,10 +25,13 @@ public sealed class MonitorConfig
 {
     public int Schema { get; set; } = 1;
     public bool Enabled { get; set; }
+    public bool SteamLinkEnabled { get; set; }
+    public string SteamLinkConfigPath { get; set; } = "";
     public List<MonitorGame> Games { get; set; } = [];
     public void Validate()
     {
         if (Schema != 1 || Games is null || Games.Count > 256) throw new InvalidDataException("不支持的监测清单格式或条目过多。");
+        if (SteamLinkEnabled && (string.IsNullOrWhiteSpace(SteamLinkConfigPath) || !System.IO.Path.IsPathFullyQualified(SteamLinkConfigPath))) throw new InvalidDataException("Steam 联动配置路径无效。");
         foreach (var game in Games) { if (game is null) throw new InvalidDataException("监测条目为空。"); game.Validate(); }
         if (Games.Select(g => g.Id).Distinct().Count() != Games.Count || Games.Select(g => g.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Games.Count)
             throw new InvalidDataException("监测条目重复。");
@@ -45,7 +48,7 @@ public sealed class MonitorRecord
     public DateTimeOffset? EndedAt { get; set; }
     public string EndReason { get; set; } = "";
 }
-public sealed record MonitorStatus(string Version, int ProcessId, DateTimeOffset UpdatedAt, int ActiveCount, string? Error);
+public sealed record MonitorStatus(string Version, int ProcessId, DateTimeOffset UpdatedAt, int ActiveCount, string? Error, string? SteamLinkState = null);
 
 public static class MonitorData
 {

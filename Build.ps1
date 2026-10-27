@@ -3,7 +3,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Push-Location -LiteralPath $PSScriptRoot
 try {
-    $release = '.build/Alpha-5.2'
+    $release = '.build/Alpha-10.0'
     $vpk = '.build/Tools/vpk.exe'
     if (!(Test-Path -LiteralPath $vpk)) {
         dotnet tool install vpk --tool-path .build/Tools --version 1.3.39-g8d2844f

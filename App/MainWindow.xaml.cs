@@ -59,7 +59,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 5.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 10.0", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -148,6 +148,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(AppUpdates.Card(session, dialogs, async () =>
         {
             if (session.Store.Error is not null || session.Scheduler.Launching) throw new InvalidOperationException("任务记录保存失败或正在启动，请稍后更新。");
+            AstralStation.Monitoring.SteamBridge.RequireIdle();
             await monitor.Stop();
             session.Scheduler.SaveHandoff();
         }, monitor.EnsureStarted));
