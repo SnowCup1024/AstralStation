@@ -3,7 +3,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Push-Location -LiteralPath $PSScriptRoot
 try {
-    $release = '.build/Alpha-4.0'
+    $release = '.build/Alpha-5.0'
     $vpk = '.build/Tools/vpk.exe'
     if (!(Test-Path -LiteralPath $vpk)) {
         dotnet tool install vpk --tool-path .build/Tools --version 1.3.39-g8d2844f
@@ -11,6 +11,8 @@ try {
     }
     dotnet publish App/AstralStation.csproj -c Release -r win-x64 --self-contained true -o "$release/App"
     if ($LASTEXITCODE -ne 0) { throw '发布失败。' }
+    dotnet publish Monitor/AstralStation.Monitor.csproj -c Release -r win-x64 --self-contained true -o "$release/App/Monitor"
+    if ($LASTEXITCODE -ne 0) { throw '后台程序发布失败。' }
     [xml]$project = Get-Content -LiteralPath App/AstralStation.csproj
     $version = [string]$project.Project.PropertyGroup[0].Version
     # Rebuilding a failed/repaired version must not reuse an index for that same version.

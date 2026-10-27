@@ -11,7 +11,12 @@ internal static class Program
     {
         // Installer hooks must run before WinUI, the instance mutex or user data are opened.
         VelopackApp.Build().SetAutoApplyOnStartup(false)
-            .OnBeforeUninstallFastCallback(_ => Services.DesktopHost.RemoveDefaultLogin())
+            .OnBeforeUninstallFastCallback(_ =>
+            {
+                new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
+                Services.MonitorClient.RemoveLogin(); Services.DesktopHost.RemoveDefaultLogin();
+            })
+            .OnBeforeUpdateFastCallback(_ => new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult())
             .Run();
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>

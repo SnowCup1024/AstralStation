@@ -1,14 +1,16 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 4.0**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 5.0**，暂不添加许可证。
 
-Alpha 4.0 使用 [Velopack](https://docs.velopack.io/) 统一处理安装、卸载和更新。应用改为目录部署，设置提供 GitHub Alpha 通道检查更新及本地更新目录；更新前保存任务交接，游戏继续运行。
+Alpha 5.0 增加独立的用户会话后台进程 `AstralStation.Monitor.exe`。与 WinUI 主应用分离，关闭主应用仍可持续观测游戏；启用后独立登记 Windows 登录启动，应用更新时先保存并停止后台，重开后恢复。无需管理员权限，不作为 SYSTEM 服务运行。
+
+后台每秒检查明确配置的进程，校验完整 EXE 路径、PID 和创建时间，拒绝同名程序误匹配；不同 Windows 会话隔离。权限不足时显示错误并保留运行状态，不误报游戏退出。每 10 秒保存观测检查点，意外中断后没有精确退出时间的记录按最后观测时间结束。只记录，不启动或终止游戏。后台清单默认空白，不自动导入启动任务，下一版本提供清单编辑界面。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含应用目录及安装器、更新包：
 
-`.build/Alpha-4.0/Installer/SnowCup1024.AstralStation-alpha-Setup.exe`
+`.build/Alpha-5.0/Installer/SnowCup1024.AstralStation-alpha-Setup.exe`
 
 `Installer` 中的 Setup.exe 用于安装，`*-full.nupkg` 与 `releases.alpha.json` 用于更新；`App/AstralStation.exe` 供开发调试。默认按用户安装到 `%LOCALAPPDATA%/SnowCup1024.AstralStation`，数据目录保持不变，卸载保留用户数据。无需另装 .NET 或 Windows App SDK。安装器尚未签名。
 
@@ -36,3 +38,5 @@ Alpha 4.0 使用 [Velopack](https://docs.velopack.io/) 统一处理安装、卸�
 ## 开发
 
 维护与智能体规则见 [AGENTS.md](AGENTS.md)。每次构建后提交并推送；完成后清理旧版本、构建缓存和临时验证产物，仅保留开发文件及当前版本。禁止过度测试、哈希测试、冒烟测试和无意义循环验证。
+
+后台数据位于数据目录的 `Monitor`：`config.json` 保存明确启用的清单，`active.json` 保存检查点，`History/日期/记录ID.json` 保存起止记录。后台和启动队列分开写入，避免多个进程覆盖同一个历史文件。命名管道仅允许当前用户连接，主应用可检查状态、请求保存退出；关闭主应用不会发出停止请求。

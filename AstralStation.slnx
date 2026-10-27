@@ -1,1 +1,1 @@
-<Solution><Project Path="App/AstralStation.csproj" /></Solution>
+<Solution><Project Path="App/AstralStation.csproj" /><Project Path="Monitor/AstralStation.Monitor.csproj" /></Solution>

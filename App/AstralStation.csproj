@@ -5,7 +5,7 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>AstralStation</RootNamespace>
     <AssemblyName>AstralStation</AssemblyName>
-    <Version>1.0.0-alpha.40</Version>
+    <Version>1.0.0-alpha.50</Version>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <ApplicationIcon>Assets/App.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -26,6 +26,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Monitoring/MonitorData.cs" Link="Monitoring/MonitorData.cs" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.1.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.1.3" />
     <EmbeddedResource Include="Assets/App.ico" LogicalName="AstralStation.App.ico" />
