@@ -120,7 +120,7 @@ internal sealed class SteamLinkController(Action<string>? request = null)
         {
             var runtime = SteamRuntime.Read(config.SteamLinkConfigPath);
             bool selected = config.Games.Any(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase) && g.ProcessName.Equals("Endfield", StringComparison.OrdinalIgnoreCase));
-            if (!selected) { Reset(); State = "Steam 联动暂停：请先手动加入实际 Endfield.exe。"; return; }
+            if (!selected) { Reset(); State = "Steam 联动暂停：实际游戏路径已改变，请重新开启联动以同步监测。"; return; }
             bool running = present.Any(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase));
             if (!running) { if (!uncertain) Reset(); State = "Steam 联动已就绪，等待终末地运行。"; return; }
             var bridge = await SteamBridge.Query(config.SteamLinkConfigPath);

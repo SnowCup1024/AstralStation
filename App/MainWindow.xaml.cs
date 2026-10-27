@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
         Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         session = new(dataRoot, paused, DispatcherQueue);
         monitor = new(dataRoot);
+        session.TasksChanged += SyncMonitoring;
         completionEligible = loginStartup || !session.Scheduler.AllDone;
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBar);
@@ -85,11 +86,20 @@ public sealed partial class MainWindow : Window
         Root.Loaded += async (_, _) =>
         {
             session.Start(); if (background && session.Store.Settings.Tray) desktop.Minimize();
-            try { monitor.RegisterLogin(); await monitor.EnsureStarted(); }
-            catch (Exception ex) { await dialogs.Error("后台监测未启动：" + ex.Message); }
+            await SyncMonitoringAsync();
             if (!pages.TryGetValue("steam", out var steam)) pages["steam"] = steam = routes["steam"]();
             if (steam is SteamLaunchPage setup) await setup.ScanOnce();
         };
+    }
+    private async void SyncMonitoring() => await SyncMonitoringAsync();
+    private async Task SyncMonitoringAsync()
+    {
+        try
+        {
+            if (session.Store.Error is null) monitor.SyncQueue(session.Store.Tasks);
+            monitor.RegisterLogin(); await monitor.EnsureStarted();
+        }
+        catch (Exception ex) { await dialogs.Error("今日队列的进程监测同步失败：" + ex.Message); }
     }
     private void NavigationInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {

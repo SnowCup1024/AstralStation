@@ -23,10 +23,10 @@ public sealed class MonitorSettings : UserControl
         var panel = new StackPanel { Spacing = 12 };
         Content = new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = panel };
         panel.Children.Add(new TextBlock { Text = "实时进程监测", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
-        panel.Children.Add(new TextBlock { Text = "只监测你明确添加的游戏，每秒检查完整路径和进程身份。关闭主应用后继续记录，启用后随 Windows 登录启动；不会启动或关闭游戏，也不改变今日任务进度。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "今日队列中的游戏会自动加入，也可手动或推荐添加。每秒检测进程，全部监测记录自动进入运行日历；关闭主应用后继续记录，不改变今日任务进度。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(enabled); panel.Children.Add(status);
         panel.Children.Add(steamLink);
-        panel.Children.Add(new TextBlock { Text = "需先手动加入实际 Endfield.exe，并在 Steam 粘贴新版启动选项。开启后，其他入口启动终末地也会唤起 Steam；无窗口等待进程跟随游戏结束。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "开启联动时自动使用 Steam 启动国服中已保存的实际游戏路径，无需重复添加；也会开启后台监测。Steam 启动选项仍需手动粘贴。其他入口启动终末地也会唤起 Steam，无窗口等待进程跟随游戏结束。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(steamState);
         var cancelSteam = new Button { Content = "取消 Steam 启动等待" };
         cancelSteam.Click += async (_, _) => await Guard(async () =>
@@ -53,26 +53,36 @@ public sealed class MonitorSettings : UserControl
                 var config = MonitorData.ReadConfig(root);
                 if (steamLink.IsOn)
                 {
-                    if (!config.Enabled) throw new InvalidOperationException("请先开启持续后台监测。");
+                    if (!AppUpdates.Installed) throw new InvalidOperationException("请先安装星间驿站，再启用持续后台监测。");
                     string path = SteamConfigPath();
-                    var setup = new SteamLaunch(Path.GetDirectoryName(path));
-                    if (!setup.Configured()) throw new InvalidOperationException("请先完成 Steam 启动国服配置，并把新版启动选项粘贴到 Steam 游戏属性。");
                     var runtime = SteamRuntime.Read(path);
-                    if (!config.Games.Any(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase) && g.ProcessName.Equals("Endfield", StringComparison.OrdinalIgnoreCase)))
-                        throw new InvalidOperationException("请先手动添加国服实际 Endfield.exe，进程名称填写 Endfield。");
+                    config.Games.RemoveAll(g => g.FromQueue && g.Path.Length == 0 && g.ProcessName.Equals("Endfield", StringComparison.OrdinalIgnoreCase));
+                    var game = config.Games.FirstOrDefault(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase));
+                    if (game is null) config.Games.Add(new MonitorGame { Path = runtime.GamePath, ProcessName = "Endfield", DisplayName = SteamLaunch.GameName });
+                    else game.ProcessName = "Endfield";
+                    config.Enabled = true;
                     config.SteamLinkConfigPath = path;
                 }
                 config.SteamLinkEnabled = steamLink.IsOn;
-                MonitorData.SaveConfig(root, config); await client.EnsureStarted();
+                MonitorData.SaveConfig(root, config); client.RegisterLogin(); await client.EnsureStarted();
             });
         };
-        Loaded += async (_, _) => await Refresh();
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        bool checking = false;
+        timer.Tick += async (_, _) =>
+        {
+            if (busy || syncing || checking || dialogs.Busy) return;
+            checking = true;
+            try { await RefreshStatus(MonitorData.ReadConfig(root)); }
+            catch (Exception ex) { status.Text = ex.Message; }
+            finally { checking = false; }
+        };
+        Loaded += async (_, _) => { await Refresh(); if (IsLoaded) timer.Start(); };
+        Unloaded += (_, _) => timer.Stop();
     }
     private string SteamConfigPath()
     {
-        var arguments = Environment.GetCommandLineArgs();
-        return arguments.Contains("--steam-root") && arguments.Contains("--data-dir")
-            ? Path.Combine(root, "SteamLaunch", SteamBridge.AppId, "config.json") : SteamBridge.DefaultConfigPath;
+        return client.SteamConfigPath;
     }
     private async Task Guard(Func<Task> action)
     {
@@ -87,14 +97,15 @@ public sealed class MonitorSettings : UserControl
         syncing = true;
         try
         {
-            var config = MonitorData.ReadConfig(root); enabled.IsOn = config.Enabled; steamLink.IsOn = config.SteamLinkEnabled; steamLink.IsEnabled = config.Enabled; games.Children.Clear();
-            if (config.Games.Count == 0) games.Children.Add(new TextBlock { Text = "尚未添加监测对象。推荐结果也需手动选择确认，才会加入清单。", TextWrapping = TextWrapping.Wrap });
+            var config = MonitorData.ReadConfig(root); enabled.IsOn = config.Enabled; steamLink.IsOn = config.SteamLinkEnabled; games.Children.Clear();
+            if (config.Games.Count == 0) games.Children.Add(new TextBlock { Text = "尚未添加监测对象。加入今日队列后自动同步，也可使用推荐添加。", TextWrapping = TextWrapping.Wrap });
             foreach (var game in config.Games)
             {
                 var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
                 text.Children.Add(new TextBlock { Text = game.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                text.Children.Add(new PathLabel { Text = game.Path });
+                text.Children.Add(new PathLabel { Text = game.Path.Length > 0 ? game.Path : "等待进程出现后识别实际 EXE 路径" });
                 text.Children.Add(new TextBlock { Text = "进程：" + game.ProcessName + ".exe", FontSize = 13 });
+                if (game.FromQueue) text.Children.Add(new TextBlock { Text = "来自今日队列 · 移出队列后停止自动监测", FontSize = 12 });
                 var row = new Grid { ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new() { Width = new(40) }); row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
                 row.Children.Add(new GameIcon { Path = game.Path, Width = 40, Height = 40 }); row.Children.Add(text); Grid.SetColumn(text, 1);
@@ -108,17 +119,22 @@ public sealed class MonitorSettings : UserControl
                     if (!await dialogs.Confirm("移除监测", game.Path + "\n停止此项监测，保留历史记录和正在运行的游戏。")) return;
                     var next = MonitorData.ReadConfig(root); next.Games.RemoveAll(g => g.Id == game.Id); MonitorData.SaveConfig(root, next);
                 });
-                buttons.Children.Add(edit); buttons.Children.Add(remove); row.Children.Add(buttons); Grid.SetColumn(buttons, 2);
+                if (!game.FromQueue) { buttons.Children.Add(edit); buttons.Children.Add(remove); }
+                row.Children.Add(buttons); Grid.SetColumn(buttons, 2);
                 games.Children.Add(row);
             }
-            var state = await client.Status();
-            status.Text = state is null ? config.Enabled ? "已启用，但后台未运行。可点击“检查并恢复后台”。" : "后台监测已关闭。清单保留，启用后开始记录。"
-                : state.Error ?? $"后台独立运行中 · 正在监测 {state.ActiveCount} 个进程 · {state.UpdatedAt:HH:mm:ss} 检查";
-            steamState.Text = !config.Enabled ? "后台关闭期间不发起 Steam 请求，已有等待进程仍会跟随游戏结束。"
-                : state?.SteamLinkState ?? (config.SteamLinkEnabled ? "联动已开启，可点击检查后台状态刷新。" : "联动关闭，仅记录本地运行历史。");
+            await RefreshStatus(config);
         }
         catch (Exception ex) { status.Text = ex.Message; }
         finally { syncing = false; }
+    }
+    private async Task RefreshStatus(MonitorConfig config)
+    {
+        var state = await client.Status();
+        status.Text = state is null ? config.Enabled ? "已启用，但后台未运行。可点击“检查并恢复后台”。" : "后台监测已关闭。清单保留，启用后开始记录。"
+            : state.Error ?? $"后台独立运行中 · 正在监测 {state.ActiveCount} 个进程 · {state.UpdatedAt:HH:mm:ss} 检查";
+        steamState.Text = !config.Enabled ? "后台关闭期间不发起 Steam 请求，已有等待进程仍会跟随游戏结束。"
+            : state?.SteamLinkState ?? (config.SteamLinkEnabled ? "联动已开启，等待后台响应。" : "联动关闭，仅记录本地运行历史。");
     }
     private async Task Edit(MonitorGame? old)
     {
@@ -137,7 +153,7 @@ public sealed class MonitorSettings : UserControl
         {
             try
             {
-                var game = new MonitorGame { Path = path.Text.Trim().Trim('"'), ProcessName = process.Text };
+                var game = new MonitorGame { Path = path.Text.Trim().Trim('"'), ProcessName = process.Text, DisplayName = old?.DisplayName ?? "" };
                 if (old is not null) game.Id = old.Id;
                 if (string.IsNullOrWhiteSpace(game.ProcessName)) game.ProcessName = Path.GetFileNameWithoutExtension(game.Path);
                 game.Validate(); if (!File.Exists(game.Path)) throw new FileNotFoundException("游戏 EXE 文件不存在。");
@@ -164,13 +180,13 @@ public sealed class MonitorSettings : UserControl
         {
             try
             {
-                var found = await Task.Run(() => Recommendations.Detect(cancellation.Token, monitoring: true));
+                var found = await Task.Run(() => Recommendations.Detect(cancellation.Token, monitoring: true, steamConfig: SteamConfigPath()));
                 if (cancellation.IsCancellationRequested) return;
                 var config = MonitorData.ReadConfig(root);
                 foreach (var task in found.Where(t => !config.Games.Any(g => string.Equals(g.Path, t.Path, StringComparison.OrdinalIgnoreCase))))
                 {
                     if (!File.Exists(task.Path) || new FileInfo(task.Path).Length == 0) continue;
-                    var game = new MonitorGame { Path = task.Path, ProcessName = Path.GetFileNameWithoutExtension(task.Path) }; game.Validate();
+                    var game = new MonitorGame { Path = task.Path, ProcessName = Path.GetFileNameWithoutExtension(task.Path), DisplayName = task.Name }; game.Validate();
                     list.Items.Add(new ListViewItem { Content = new TextBlock { Text = task.Name + "\n" + task.Path, TextWrapping = TextWrapping.Wrap }, Tag = game });
                 }
                 label.Text = list.Items.Count == 0 ? "没有找到可添加的游戏，可返回手动添加。" : "选择要监测的游戏。确认前不会加入清单，也不会启动游戏。";

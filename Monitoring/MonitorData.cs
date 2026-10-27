@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace AstralStation.Monitoring;
 
@@ -9,12 +10,19 @@ public sealed class MonitorGame
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Path { get; set; } = "";
     public string ProcessName { get; set; } = "";
-    public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
+    public string DisplayName { get; set; } = "";
+    public string QueueTaskId { get; set; } = "";
+    [JsonIgnore] public bool FromQueue => QueueTaskId.Length > 0;
+    [JsonIgnore] public string Name => DisplayName.Length > 0 ? DisplayName : Path.Length > 0 ? System.IO.Path.GetFileNameWithoutExtension(Path) : ProcessName;
     public void Validate()
     {
-        if (!Guid.TryParseExact(Id, "N", out _) || string.IsNullOrWhiteSpace(Path) || !System.IO.Path.IsPathFullyQualified(Path) || !Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        if (Path is null || QueueTaskId is null || DisplayName is null || !Guid.TryParseExact(Id, "N", out _))
+            throw new InvalidDataException("监测条目字段无效。");
+        // Queue tasks may launch a shortcut/script. Resolve their selected process names to
+        // the actual EXE on observation, then persist its full path and process identity.
+        if (!(FromQueue && Path.Length == 0) && (!System.IO.Path.IsPathFullyQualified(Path) || !Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("监测路径必须是完整的 EXE 路径。");
-        Path = System.IO.Path.GetFullPath(Path);
+        if (Path.Length > 0) Path = System.IO.Path.GetFullPath(Path);
         ProcessName = ProcessName?.Trim() ?? "";
         if (ProcessName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) ProcessName = ProcessName[..^4];
         if (ProcessName.Length is 0 or > 260 || ProcessName.IndexOfAny(['\\', '/', ':', '*', '?', '"', '\r', '\n']) >= 0)
@@ -33,7 +41,7 @@ public sealed class MonitorConfig
         if (Schema != 1 || Games is null || Games.Count > 256) throw new InvalidDataException("不支持的监测清单格式或条目过多。");
         if (SteamLinkEnabled && (string.IsNullOrWhiteSpace(SteamLinkConfigPath) || !System.IO.Path.IsPathFullyQualified(SteamLinkConfigPath))) throw new InvalidDataException("Steam 联动配置路径无效。");
         foreach (var game in Games) { if (game is null) throw new InvalidDataException("监测条目为空。"); game.Validate(); }
-        if (Games.Select(g => g.Id).Distinct().Count() != Games.Count || Games.Select(g => g.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Games.Count)
+        if (Games.Select(g => g.Id).Distinct().Count() != Games.Count || Games.Select(g => g.Path.Length > 0 ? "path:" + g.Path : "name:" + g.ProcessName).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Games.Count)
             throw new InvalidDataException("监测条目重复。");
     }
 }
@@ -105,7 +113,7 @@ public static class MonitorData
             {
                 var record = Read<MonitorRecord>(file); record.Game.Validate();
                 if (!string.Equals(RecordPath(root, record), System.IO.Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase)
-                    || record.ProcessId <= 0 || record.CreatedUtcTicks <= 0 || record.EndReason is null || record.StartedAt == default || record.LastSeenAt < record.StartedAt || record.EndedAt < record.StartedAt)
+                    || record.Game.Path.Length == 0 || record.ProcessId <= 0 || record.CreatedUtcTicks <= 0 || record.EndReason is null || record.StartedAt == default || record.LastSeenAt < record.StartedAt || record.EndedAt < record.StartedAt)
                     throw new InvalidDataException("记录身份、日期或起止时间无效。");
                 records.Add(record);
             }

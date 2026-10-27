@@ -165,7 +165,8 @@ public sealed class HistoryView : Grid
                 {
                     Id = "monitor-" + record.Id, Name = record.Game.Name, Path = record.Game.Path, Date = selected,
                     Time = record.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), EndTime = record.EndedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "",
-                    Source = "后台监测", Note = record.EndedAt is null ? "尚未记录退出时间" : record.EndReason == "进程退出" ? "" : record.EndReason
+                    Source = record.Game.FromQueue ? "进程监测 · 今日队列" : "进程监测",
+                    Note = record.EndedAt is null ? "运行中" : record.EndReason == "进程退出" ? "" : record.EndReason
                 });
             notice.Text = errors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", errors);
             notice.Visibility = errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;

@@ -3,10 +3,11 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using AstralStation.Monitoring;
 
 namespace AstralStation.Launch;
 
-// Only the user's Alpha 2.0 list. No emulator, Steam, installer or generic launcher is a game process.
+// Only named games and the saved national-server configuration; never a generic launcher.
 public static class Recommendations
 {
     private sealed record Profile(string Name, string[] Aliases, string? Executable = null)
@@ -21,6 +22,7 @@ public static class Recommendations
         new("绝区零", ["ZenlessZoneZero Game", "ZenlessZoneZero", "Zenless Zone Zero", "绝区零"], "ZenlessZoneZero.exe"),
         new("崩坏3", ["Honkai Impact 3rd Games", "Honkai Impact 3rd", "Honkai Impact 3", "BH3", "崩坏3"], "BH3.exe"),
         new("明日方舟", ["Arknights", "Arknights Game", "Arknights_CN", "Arknights_EN", "明日方舟"], "Arknights.exe"),
+        new("明日方舟：终末地", ["Arknights Endfield", "Endfield Game", "Endfield", "终末地", "明日方舟：终末地"], "Endfield.exe"),
 
         new("重返未来：1999", ["重返未来1999", "Reverse1999", "Reverse 1999"]),
         new("异环", ["异环", "Neverness to Everness", "NTE"]),
@@ -48,7 +50,7 @@ public static class Recommendations
     private static bool Helper(string name) => HelperNames
         .Any(part => name.Contains(part, StringComparison.OrdinalIgnoreCase));
 
-    public static List<LaunchTask> Detect(CancellationToken token, bool monitoring = false)
+    public static List<LaunchTask> Detect(CancellationToken token, bool monitoring = false, string? steamConfig = null)
     {
         var hints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void AddHint(string? path)
@@ -227,6 +229,15 @@ public static class Recommendations
                 string process = Path.GetFileNameWithoutExtension(file);
                 if (!task.ProcessNames.Contains(process, StringComparer.OrdinalIgnoreCase)) task.ProcessNames.Add(process);
             }
+        }
+        if (monitoring && File.Exists(steamConfig ?? SteamBridge.DefaultConfigPath))
+        {
+            try
+            {
+                var runtime = SteamRuntime.Read(steamConfig ?? SteamBridge.DefaultConfigPath);
+                result.TryAdd(runtime.GamePath, new LaunchTask { Name = "明日方舟：终末地", Path = runtime.GamePath, ProcessNames = ["Endfield"] });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException) { }
         }
         return result.Values.ToList();
     }

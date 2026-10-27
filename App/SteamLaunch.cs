@@ -405,14 +405,25 @@ internal sealed class SteamLaunch
         try { File.WriteAllBytes(temp, bytes); File.Move(temp, path, true); }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
-    public bool Configured()
+    public bool Configured() => ConfigurationStatus().Ready;
+    internal (bool Ready, string Message) ConfigurationStatus()
     {
         try
         {
             ValidatePaths(); _ = ReadReceipt();
-            return File.Exists(ExePath) && File.Exists(AcfPath) && File.Exists(ConfigPath) && File.ReadAllText(ConfigPath) == JsonSerializer.Serialize(Config, Json) && CurrentOptions() == LaunchOptions && ReadAcf().Get("StateFlags") == "4";
+            if (!File.Exists(ExePath) || !File.Exists(AcfPath) || !File.Exists(ConfigPath)) return (false, "请完成空 EXE、ACF 和启动配置。");
+            var saved = JsonSerializer.Deserialize<Settings>(File.ReadAllText(ConfigPath), Json) ?? throw new InvalidDataException("启动配置为空。");
+            static bool SamePath(string left, string right) => !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right)
+                && string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)), StringComparison.OrdinalIgnoreCase);
+            if (!SamePath(saved.SteamPath, Config.SteamPath) || saved.Account != Config.Account || !SamePath(saved.Library, Config.Library)
+                || !SamePath(saved.Launcher, Config.Launcher) || !SamePath(saved.GameDirectory, Config.GameDirectory) || !SamePath(saved.BridgeExecutable, Config.BridgeExecutable)
+                || saved.Arguments != Config.Arguments || saved.ExitGraceSeconds != Config.ExitGraceSeconds || saved.WaitForGameSeconds != Config.WaitForGameSeconds || saved.CloseOwnedLauncher != Config.CloseOwnedLauncher)
+                return (false, "启动配置有未应用的更改，请在第 4 步保存。");
+            if (ReadAcf().Get("StateFlags") != "4") return (false, "Steam 安装清单尚未就绪。");
+            if (CurrentOptions()?.Trim() != LaunchOptions) return (false, "尚未从 Steam 文件检测到当前启动命令，请在 Steam 中保存启动选项；文件保存后会自动重新检测。");
+            return (true, "配置已就绪。");
         }
-        catch { return false; }
+        catch (Exception ex) { return (false, ex.GetBaseException().Message); }
     }
     public static List<string> DetectSteam()
     {
@@ -575,6 +586,7 @@ internal sealed class SteamLaunchPage : Grid
     private readonly GameIcon icon = new() { Width = 52, Height = 52 };
     private readonly Button back = new() { Content = "返回", Visibility = Visibility.Collapsed };
     private readonly GridView games = new() { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true };
+    private readonly DispatcherTimer statusTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool busy, initialized;
     private readonly List<(Button Button, string Action)> guarded = [];
     private static TextBox ReadOnly() => new() { IsReadOnly = true, MinWidth = 80 };
@@ -582,6 +594,9 @@ internal sealed class SteamLaunchPage : Grid
     public SteamLaunchPage(Dialogs dialogs, string? testData = null, string? testSteam = null)
     {
         this.dialogs = dialogs;
+        statusTimer.Tick += (_, _) => { if (initialized && !busy && !refreshing) Refresh(); };
+        Loaded += (_, _) => { Refresh(); statusTimer.Start(); };
+        Unloaded += (_, _) => statusTimer.Stop();
         initialization = Initialize(testData, testSteam);
     }
     private async Task Initialize(string? testData, string? testSteam)
@@ -765,7 +780,7 @@ internal sealed class SteamLaunchPage : Grid
                         }
                         var placeholder = target.Length == 0 ? (Text: "当前不存在", BlockReason: (string?)null, NonEmpty: false) : snapshot.PlaceholderStatus();
                         return (Reasons: reasons, StepReasons: stepReasons, Exe: target, Acf: manifest, Placeholder: placeholder,
-                            AcfState: manifestState, Exists: File.Exists(manifest), Configured: snapshot.Configured());
+                            AcfState: manifestState, Exists: File.Exists(manifest), Status: snapshot.ConfigurationStatus());
                     });
                     if (revision != refreshRevision) continue;
                     for (int i = 0; i < guarded.Count; i++)
@@ -784,7 +799,8 @@ internal sealed class SteamLaunchPage : Grid
                     exeState.Text = view.Placeholder.Text;
                     exeState.Foreground = new SolidColorBrush(view.Placeholder.NonEmpty ? Microsoft.UI.Colors.Firebrick : ActualTheme == ElementTheme.Dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
                     acfState.Text = view.AcfState; applyAcf.Content = view.Exists ? "更新" : "应用";
-                    tile.BorderBrush = new SolidColorBrush(view.Configured ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
+                    tile.BorderBrush = new SolidColorBrush(view.Status.Ready ? Microsoft.UI.Colors.SeaGreen : Microsoft.UI.Colors.LightGray);
+                    ToolTipService.SetToolTip(tile, view.Status.Message);
                 }
                 catch (Exception ex) { if (revision == refreshRevision) ShowNotice(ErrorMessage(ex), true); }
             } while (revision != refreshRevision);

@@ -122,7 +122,11 @@ internal sealed class MonitorEngine(string root)
                         var path = new StringBuilder(32768); int length = path.Capacity;
                         if (!QueryFullProcessImageNameW(handle, 0, path, ref length) || !GetProcessTimes(handle, out long created, out _, out _, out _))
                         { uncertain.Add(group.Key); continue; }
-                        foreach (var game in group.Where(g => string.Equals(g.Path, path.ToString(), StringComparison.OrdinalIgnoreCase))) found[(game.Id, process.Id, created)] = game;
+                        string actualPath = path.ToString();
+                        var game = group.Where(g => config.Games.Any(selected => selected.Id == g.Id) && (g.Path.Length == 0 || string.Equals(g.Path, actualPath, StringComparison.OrdinalIgnoreCase)))
+                            .OrderBy(g => g.Path.Length == 0).ThenBy(g => g.FromQueue).FirstOrDefault();
+                        if (game is not null)
+                            found[(game.Id, process.Id, created)] = new MonitorGame { Id = game.Id, Path = actualPath, ProcessName = game.ProcessName, DisplayName = game.DisplayName, QueueTaskId = game.QueueTaskId };
                     }
                     finally { CloseHandle(handle); }
                 }
@@ -132,7 +136,7 @@ internal sealed class MonitorEngine(string root)
         bool changed = false;
         foreach (var record in active.ToArray())
         {
-            if (!config.Games.Any(g => g.Id == record.Game.Id && string.Equals(g.Path, record.Game.Path, StringComparison.OrdinalIgnoreCase) && string.Equals(g.ProcessName, record.Game.ProcessName, StringComparison.OrdinalIgnoreCase)))
+            if (!config.Games.Any(g => g.Id == record.Game.Id && (g.Path.Length == 0 || string.Equals(g.Path, record.Game.Path, StringComparison.OrdinalIgnoreCase)) && string.Equals(g.ProcessName, record.Game.ProcessName, StringComparison.OrdinalIgnoreCase)))
             { Finish(record, now, "已移出或修改监测清单"); changed = true; continue; }
             if (found.ContainsKey((record.Game.Id, record.ProcessId, record.CreatedUtcTicks))) { record.LastSeenAt = now; continue; }
             if (uncertain.Contains(record.Game.ProcessName)) continue;

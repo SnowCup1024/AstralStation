@@ -1,4 +1,5 @@
 using AstralStation.Monitoring;
+using AstralStation.Launch;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO.Pipes;
@@ -8,6 +9,41 @@ namespace AstralStation.Services;
 
 public sealed class MonitorClient(string root)
 {
+    public string SteamConfigPath
+    {
+        get
+        {
+            var arguments = Environment.GetCommandLineArgs();
+            return arguments.Contains("--steam-root") && arguments.Contains("--data-dir")
+                ? Path.Combine(root, "SteamLaunch", SteamBridge.AppId, "config.json") : SteamBridge.DefaultConfigPath;
+        }
+    }
+    public void SyncQueue(IEnumerable<LaunchTask> tasks)
+    {
+        bool first = !File.Exists(MonitorData.ConfigPath(root));
+        var config = MonitorData.ReadConfig(root);
+        var next = config.Games.Where(g => !g.FromQueue).ToList();
+        foreach (var task in tasks)
+        {
+            IEnumerable<string> names = task.ProcessNames.Count > 0 ? task.ProcessNames : task.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? [Path.GetFileNameWithoutExtension(task.Path)] : [];
+            foreach (string name in names)
+            {
+                string path = "";
+                // A Steam placeholder is never an actual process target.
+                foreach (string candidate in new[] { task.Path, Path.Combine(task.WorkingDirectory.Length > 0 ? task.WorkingDirectory : Path.GetDirectoryName(task.Path) ?? "", name + ".exe") })
+                    if (Path.IsPathFullyQualified(candidate) && Path.GetFileNameWithoutExtension(candidate).Equals(name, StringComparison.OrdinalIgnoreCase) && candidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(candidate) && new FileInfo(candidate).Length > 0)
+                    { path = Path.GetFullPath(candidate); break; }
+                if (next.Any(g => path.Length > 0 ? string.Equals(g.Path, path, StringComparison.OrdinalIgnoreCase) : g.Path.Length == 0 && g.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
+                var previous = config.Games.FirstOrDefault(g => g.FromQueue && g.QueueTaskId == task.Id && g.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                var game = new MonitorGame { Id = previous?.Id ?? Guid.NewGuid().ToString("N"), Path = path, ProcessName = name, DisplayName = task.Name, QueueTaskId = task.Id };
+                game.Validate(); next.Add(game);
+            }
+        }
+        string before = JsonSerializer.Serialize(config.Games);
+        config.Games = next;
+        if (first && next.Count > 0) config.Enabled = true;
+        if ((first && next.Count > 0) || before != JsonSerializer.Serialize(next)) MonitorData.SaveConfig(root, config);
+    }
     private string Identity => MonitorData.Identity(root);
     private static string Executable => Path.Combine(AppContext.BaseDirectory, "Monitor", "AstralStation.Monitor.exe");
     public async Task<MonitorStatus?> Status()
