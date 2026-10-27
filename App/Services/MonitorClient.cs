@@ -59,12 +59,20 @@ public sealed class MonitorClient(string root)
     {
         var config = MonitorData.ReadConfig(root);
         if (enabled && !AppUpdates.Installed) throw new InvalidOperationException("请先安装星间驿站，再启用持续后台监测。");
+        bool previous = config.Enabled;
+        using var registry = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+        string? previousCommand = registry.GetValue(Identity) as string;
         config.Enabled = enabled; MonitorData.SaveConfig(root, config);
-        if (enabled) { RegisterLogin(); await EnsureStarted(); }
-        else
+        try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true);
-            key?.DeleteValue(Identity, false); await Stop();
+            if (enabled) { RegisterLogin(); await EnsureStarted(); }
+            else { registry.DeleteValue(Identity, false); await Stop(); }
+        }
+        catch
+        {
+            var restore = MonitorData.ReadConfig(root); restore.Enabled = previous; MonitorData.SaveConfig(root, restore);
+            if (previousCommand is null) registry.DeleteValue(Identity, false); else registry.SetValue(Identity, previousCommand);
+            throw;
         }
     }
     public void RegisterLogin()

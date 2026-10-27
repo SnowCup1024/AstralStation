@@ -48,7 +48,7 @@ public static class Recommendations
     private static bool Helper(string name) => HelperNames
         .Any(part => name.Contains(part, StringComparison.OrdinalIgnoreCase));
 
-    public static List<LaunchTask> Detect(CancellationToken token)
+    public static List<LaunchTask> Detect(CancellationToken token, bool monitoring = false)
     {
         var hints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         void AddHint(string? path)
@@ -221,8 +221,8 @@ public static class Recommendations
                 // A remote launcher may live outside the game directory; only use it when unambiguous.
                 link ??= game.Executable is null && binaries.Count == 1 && shortcuts.Count(s => s.Game == game) == 1 ? shortcuts.Single(s => s.Game == game) : null;
                 // DMM authentication cannot be replaced by running umamusume.exe directly.
-                if (link is null && (game.Name == "赛马娘" || file.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase))) continue;
-                string launch = link?.Path ?? file;
+                if (!monitoring && link is null && (game.Name == "赛马娘" || file.EndsWith("-Win64-Shipping.exe", StringComparison.OrdinalIgnoreCase))) continue;
+                string launch = monitoring ? file : link?.Path ?? file;
                 if (!result.TryGetValue(launch, out var task)) result[launch] = task = new() { Name = game.Name, Path = launch, ProcessNames = [], WorkingDirectory = link is null ? Path.GetDirectoryName(file)! : "" };
                 string process = Path.GetFileNameWithoutExtension(file);
                 if (!task.ProcessNames.Contains(process, StringComparer.OrdinalIgnoreCase)) task.ProcessNames.Add(process);

@@ -1,16 +1,16 @@
 # 星间驿站
 
-私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 5.0**，暂不添加许可证。
+私人 Windows 游戏工具箱，C# / WinUI，简体中文。当前版本 **Alpha 5.1**，暂不添加许可证。
 
-Alpha 5.0 增加独立的用户会话后台进程 `AstralStation.Monitor.exe`。与 WinUI 主应用分离，关闭主应用仍可持续观测游戏；启用后独立登记 Windows 登录启动，应用更新时先保存并停止后台，重开后恢复。无需管理员权限，不作为 SYSTEM 服务运行。
+Alpha 5.1 增加独立的用户会话后台进程 `AstralStation.Monitor.exe`。与 WinUI 主应用分离，关闭主应用仍可持续观测游戏；启用后独立登记 Windows 登录启动，应用更新时先保存并停止后台，重开后恢复。无需管理员权限，不作为 SYSTEM 服务运行。
 
-后台每秒检查明确配置的进程，校验完整 EXE 路径、PID 和创建时间，拒绝同名程序误匹配；不同 Windows 会话隔离。权限不足时显示错误并保留运行状态，不误报游戏退出。每 10 秒保存观测检查点，意外中断后没有精确退出时间的记录按最后观测时间结束。只记录，不启动或终止游戏。后台清单默认空白，不自动导入启动任务，下一版本提供清单编辑界面。
+后台每秒检查明确配置的进程，校验完整 EXE 路径、PID 和创建时间，拒绝同名程序误匹配；不同 Windows 会话隔离。权限不足时显示错误并保留运行状态，不误报游戏退出。每 10 秒保存观测检查点，意外中断后没有精确退出时间的记录按最后观测时间结束。只记录，不启动或终止游戏。后台清单默认空白，不自动导入启动任务。总设置的“实时进程监测”卡片位于启动管理与本地数据之间，提供手动添加、编辑、移除和推荐添加，只需要实际 EXE 路径与进程名称。推荐共用启动任务的安装检测逻辑，使用实际进程文件而非启动快捷方式；仍需选择确认，绝不自动加入。空 EXE 占位文件不能作为监测对象。终末地等不在原推荐清单内的游戏可手动添加。
 
 ## 构建与运行
 
 需要 .NET SDK 10.0.402 与 Windows SDK 10.0.26100。运行 `./Build.ps1`，生成自包含应用目录及安装器、更新包：
 
-`.build/Alpha-5.0/Installer/SnowCup1024.AstralStation-alpha-Setup.exe`
+`.build/Alpha-5.1/Installer/SnowCup1024.AstralStation-alpha-Setup.exe`
 
 `Installer` 中的 Setup.exe 用于安装，`*-full.nupkg` 与 `releases.alpha.json` 用于更新；`App/AstralStation.exe` 供开发调试。默认按用户安装到 `%LOCALAPPDATA%/SnowCup1024.AstralStation`，数据目录保持不变，卸载保留用户数据。无需另装 .NET 或 Windows App SDK。安装器尚未签名。
 

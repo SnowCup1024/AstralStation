@@ -58,7 +58,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 5.0", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 5.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -190,33 +190,8 @@ public sealed partial class MainWindow : Window
             finally { Sync(); ShowLoginError(); }
         };
         Sync(); ShowLoginError();
-        var monitorToggle = new ToggleSwitch { Header = "持续后台监测", OffContent = "关闭", OnContent = "开启" };
-        var monitorStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 13 };
-        var refreshMonitor = new Button { Content = "检查后台状态" };
-        async Task RefreshMonitor()
-        {
-            try
-            {
-                monitorToggle.IsOn = AstralStation.Monitoring.MonitorData.ReadConfig(session.Store.Root).Enabled;
-                var state = await monitor.Status();
-                monitorStatus.Text = state is null ? "后台未运行。监测清单默认为空，不会自动导入启动任务。" : state.Error ?? $"后台独立运行中 · 正在监测 {state.ActiveCount} 个进程。关闭窗口或退出应用后继续运行。";
-            }
-            catch (Exception ex) { monitorStatus.Text = ex.Message; }
-        }
-        bool monitorReady = false;
-        monitorToggle.Toggled += async (_, _) =>
-        {
-            if (!monitorReady) return;
-            monitorReady = false; monitorToggle.IsEnabled = refreshMonitor.IsEnabled = false;
-            using var scope = dialogs.Interaction();
-            try { await monitor.SetEnabled(monitorToggle.IsOn); }
-            catch (Exception ex) { await dialogs.Error(ex.Message); }
-            finally { await RefreshMonitor(); monitorReady = true; monitorToggle.IsEnabled = refreshMonitor.IsEnabled = true; }
-        };
-        refreshMonitor.Click += async (_, _) => { monitorReady = false; await RefreshMonitor(); monitorReady = true; };
-        monitorToggle.Loaded += async (_, _) => { monitorReady = false; await RefreshMonitor(); monitorReady = true; };
-        launch.Children.Add(monitorToggle); launch.Children.Add(monitorStatus); launch.Children.Add(refreshMonitor);
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = launch });
+        panel.Children.Add(new MonitorSettings(session.Store.Root, dialogs, monitor));
         var data = new StackPanel { Spacing = 12 };
         data.Children.Add(new TextBlock { Text = "本地数据", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
         data.Children.Add(new TextBlock { Text = session.Store.Root, IsTextSelectionEnabled = true });
