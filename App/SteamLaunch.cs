@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 using AstralStation.Monitoring;
-#if !STEAM_TEST
+#if !STEAM_CORE_ONLY
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -72,13 +72,11 @@ internal sealed class SteamLaunch
     private readonly Action checkSteamClosed;
     public List<Account> Accounts { get; private set; } = [];
     public List<string> Libraries { get; private set; } = [];
-    public string ScriptPath => Path.Combine(Root, "launch.ps1");
     public string ConfigPath => Path.Combine(Root, "config.json");
     private string ReceiptPath => Path.Combine(Root, "original.json");
     public string AcfPath => Under(Config.Library, "steamapps", $"appmanifest_{AppId}.acf");
     public string ExePath => Under(Config.Library, "steamapps", "common", Latest?.InstallDir ?? InstalledDirectory(), Latest?.Executable ?? "Endfield.exe");
     public string LocalConfigPath => Under(SteamRoot, "userdata", AccountId(Config.Account), "config", "localconfig.vdf");
-    public static string PowerShellPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
     public string LaunchOptions => SteamBridge.Options(Config.BridgeExecutable, ConfigPath);
     private static readonly string[] OptionKeys = ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps", AppId, "LaunchOptions"];
     public SteamLaunch(string? root = null, string? steamRoot = null, Action? checkSteamClosed = null)
@@ -141,7 +139,6 @@ internal sealed class SteamLaunch
     public void Require(string action)
     {
         if (action == "options") throw new InvalidOperationException("启动选项只支持复制，请在 Steam 中手动填写。");
-        if (action is "remove" or "bootstrap") return;
         if (!Path.IsPathFullyQualified(SteamRoot) || !File.Exists(Path.Combine(SteamRoot, "steam.exe"))) throw new InvalidOperationException("请先选择或检测 Steam 路径。");
         if (!Accounts.Any(a => a.Id == Config.Account)) throw new InvalidOperationException("请先选择 Steam 账号。");
         if (action == "exe" && PlaceholderStatus().BlockReason is string reason) throw new InvalidOperationException(reason);
@@ -227,9 +224,9 @@ internal sealed class SteamLaunch
         if (result.InstallDir.Contains('\\') || result.InstallDir.Contains('/') || !result.Executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !ulong.TryParse(build, out ulong b) || b == 0 || manifests.Count == 0 || manifests.Any(d => !ulong.TryParse(d.Manifest, out ulong id) || id == 0)) throw new InvalidOperationException("Steam 返回的构建数据不完整，未生成 ACF。");
         return result;
     }
-    public async Task Fetch(bool generate = true, bool complete = false)
+    public async Task Fetch(bool generate = true)
     {
-        if (generate) Require(complete ? "all" : "generate");
+        if (generate) Require("generate");
         Latest = null; Draft = null;
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25), MaxResponseContentBufferSize = 4 * 1024 * 1024 };
         string json = await client.GetStringAsync($"https://api.steamcmd.net/v1/info/{AppId}");
@@ -305,7 +302,7 @@ internal sealed class SteamLaunch
         {
             bool allowed = item.Kind switch
             {
-                "script" => item.Path.Equals(ScriptPath, StringComparison.OrdinalIgnoreCase),
+                "script" => item.Path.Equals(Path.Combine(Root, "launch.ps1"), StringComparison.OrdinalIgnoreCase),
                 "config" => item.Path.Equals(ConfigPath, StringComparison.OrdinalIgnoreCase),
                 "acf" => Libraries.Any(l => item.Path.Equals(Under(l, "steamapps", $"appmanifest_{AppId}.acf"), StringComparison.OrdinalIgnoreCase)),
                 "exe" => Libraries.Any(l => item.Path.StartsWith(Under(l, "steamapps", "common") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) && Path.GetFileName(item.Path).Equals("Endfield.exe", StringComparison.OrdinalIgnoreCase),
@@ -316,23 +313,6 @@ internal sealed class SteamLaunch
             NoLinks(item.Path);
         }
         return receipt;
-    }
-    private static bool OnlyAcfRuntimeChanged(byte[]? before, byte[] applied)
-    {
-        if (before is null) return false;
-        try
-        {
-            string Normalize(byte[] bytes)
-            {
-                var state = new Kv(Encoding.UTF8.GetString(bytes)).Find("AppState") ?? throw new FormatException();
-                if (state.Get("appid") != AppId || !ulong.TryParse(state.Get("SizeOnDisk"), out var size) || size != 0) throw new FormatException();
-                string Canonical(Kv.Node node) => node.Children is null ? JsonSerializer.Serialize(node.Value) : "{" + string.Join(",", node.Children.OrderBy(n => n.Key, StringComparer.OrdinalIgnoreCase).Select(n => JsonSerializer.Serialize(n.Key.ToLowerInvariant()) + ":" + Canonical(n))) + "}";
-                state.Children!.RemoveAll(n => new[] { "LastPlayed", "LastOwner", "LastUpdated" }.Contains(n.Key, StringComparer.OrdinalIgnoreCase));
-                return Canonical(state);
-            }
-            return Normalize(before) == Normalize(applied);
-        }
-        catch { return false; }
     }
     private static byte[] Utf8(string text) => new UTF8Encoding(false).GetBytes(text);
     private static byte[]? ReadBytes(string path) => File.Exists(path) ? File.ReadAllBytes(path) : null;
@@ -357,59 +337,30 @@ internal sealed class SteamLaunch
             NoLinks(path);
             byte[]? before = ReadBytes(path);
             var owned = receipt.Files.SingleOrDefault(o => o.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
-            if (owned is not null && !Equal(before, Convert.FromBase64String(owned.Applied)) && kind != "acf" && !(kind == "script" && before is null)) throw new InvalidOperationException("文件已被外部修改，已拒绝覆盖：" + path);
+            if (owned is not null && !Equal(before, Convert.FromBase64String(owned.Applied)) && kind != "acf") throw new InvalidOperationException("文件已被外部修改，已拒绝覆盖：" + path);
             if (owned is null) { owned = new() { Path = path, Kind = kind, Original = before is null ? null : Convert.ToBase64String(before) }; receipt.Files.Add(owned); }
             owned.Applied = Convert.ToBase64String(next);
             if (!Equal(before, next)) { changes.Add(new(path, before, next, label)); details.Add($"{label}\n{path}"); }
         }
-        if (action == "remove")
+        if (action is not ("exe" or "acf" or "runtime")) throw new InvalidOperationException("不支持的配置操作。");
+        GuardInstallation();
+        if (action == "exe")
         {
-            if (receipt.Files.Count == 0) throw new InvalidOperationException("没有由星间驿站应用的配置可移除。");
-            foreach (var item in receipt.Files)
-            {
-                NoLinks(item.Path);
-                byte[]? before = ReadBytes(item.Path);
-                if (item.Kind == "options") continue;
-                {
-                    byte[] applied = Convert.FromBase64String(item.Applied);
-                    if (!Equal(before, applied) && !(item.Kind == "acf" && OnlyAcfRuntimeChanged(before, applied))) throw new InvalidOperationException("文件已改变，不能自动移除：" + item.Path);
-                    byte[]? original = item.Original is null ? null : Convert.FromBase64String(item.Original);
-                    changes.Add(new(item.Path, before, original, original is null ? "删除本工具生成的文件" : "恢复原文件"));
-                    details.Add((original is null ? "删除：" : "恢复：") + item.Path);
-                }
-            }
-            receipt.Files.RemoveAll(f => f.Kind != "options");
-            changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), receipt.Files.Count == 0 ? null : Utf8(JsonSerializer.Serialize(receipt, Json)), "移除本次配置记录，保留旧版启动选项备份"));
-            details.Add("Steam 启动选项请在 Steam 中手动清除或恢复。");
+            if (Latest is null) throw new InvalidOperationException("请先获取最新数据，确认 Steam 的 EXE 目标路径。");
+            FileChange(ExePath, [], "exe", "生成零字节 EXE");
         }
-        else
+        if (action == "acf")
         {
-            if (action != "bootstrap") GuardInstallation();
-            if (action is "all" or "exe")
-            {
-                if (Latest is null) throw new InvalidOperationException("请先获取最新数据，确认 Steam 的 EXE 目标路径。");
-                FileChange(ExePath, [], "exe", "生成零字节 EXE");
-            }
-            if (action is "all" or "acf")
-            {
-                if (Latest is null || Draft is null || draftLibrary != Config.Library) throw new InvalidOperationException("请先点击“获取最新数据并生成”。");
-                FileChange(AcfPath, Utf8(GenerateAcf(Latest)), "acf", $"{(File.Exists(AcfPath) ? "更新" : "应用")} ACF，buildid → {Latest.Build}，SizeOnDisk → 0");
-            }
-            if (action is "all" or "acf" or "runtime")
-            {
-                SteamBridge.RequireIdle();
-                ValidatePaths();
-                FileChange(ConfigPath, Utf8(JsonSerializer.Serialize(Config, Json)), "config", $"保存启动设置\n官方启动器：{Config.Launcher}\n国服目录：{Config.GameDirectory}\n启动参数：{Config.Arguments}\n退出等待：{Config.ExitGraceSeconds} 秒\n关闭本次新开的启动器：{(Config.CloseOwnedLauncher ? "开启" : "关闭")}");
-            }
-            if ((action is "all" or "acf" or "runtime" or "bootstrap") && !File.Exists(ScriptPath))
-                FileChange(ScriptPath, [239, 187, 191, .. Utf8(Script)], "script", "自动生成启动脚本");
-            changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), Utf8(JsonSerializer.Serialize(receipt, Json)), "保存原始配置备份"));
+            if (Latest is null || Draft is null || draftLibrary != Config.Library) throw new InvalidOperationException("请先点击“获取最新数据并生成”。");
+            FileChange(AcfPath, Utf8(GenerateAcf(Latest)), "acf", $"{(File.Exists(AcfPath) ? "更新" : "应用")} ACF，buildid → {Latest.Build}，SizeOnDisk → 0");
         }
+        if (action is "acf" or "runtime")
+        {
+            SteamBridge.RequireIdle(); ValidatePaths();
+            FileChange(ConfigPath, Utf8(JsonSerializer.Serialize(Config, Json)), "config", $"保存启动设置\n官方启动器：{Config.Launcher}\n国服目录：{Config.GameDirectory}\n启动参数：{Config.Arguments}\n退出等待：{Config.ExitGraceSeconds} 秒\n关闭本次新开的启动器：{(Config.CloseOwnedLauncher ? "开启" : "关闭")}");
+        }
+        changes.Add(new(ReceiptPath, ReadBytes(ReceiptPath), Utf8(JsonSerializer.Serialize(receipt, Json)), "保存原始配置备份"));
         return new(changes, string.Join("\n\n", details));
-    }
-    public void EnsureScript()
-    {
-        if (!File.Exists(ScriptPath)) Apply(Prepare("bootstrap"));
     }
     public void Apply(Plan plan)
     {
@@ -576,8 +527,7 @@ internal sealed class SteamLaunch
             return result;
         }
         private static string Quote(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-        public string Set(string[] keys, string? value) => value is null ? Remove(keys) : SetRaw(keys, Quote(value));
-        private string Remove(string[] keys) { var n = Find(keys); return n is null ? text : text.Remove(n.Start, n.End - n.Start); }
+        public string Set(string[] keys, string value) => SetRaw(keys, Quote(value));
         public string SetRaw(string[] keys, string raw)
         {
             var found = Find(keys);
@@ -596,27 +546,10 @@ internal sealed class SteamLaunch
         }
     }
 
-    public const string Script = """
-# 星间驿站 · Steam 启动国服 · Alpha 10.0 兼容入口
-# 新版 Steam 启动选项直接运行 WinExe；本文件仅供兼容调用，不执行 %command%。
-$ErrorActionPreference = 'Stop'
-$configPath = Join-Path $PSScriptRoot 'config.json'
-try {
-    $cfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $bridge = [string]$cfg.BridgeExecutable
-    if (-not [IO.Path]::IsPathRooted($bridge) -or -not [IO.File]::Exists($bridge)) {
-        throw '无窗口等待程序未配置，请重新复制新版 Steam 启动选项。'
-    }
-    & $bridge --steam-bridge --config $configPath
-    exit $LASTEXITCODE
-} catch {
-    [IO.File]::AppendAllText((Join-Path $PSScriptRoot 'bridge-error.log'), $_.Exception.Message + [Environment]::NewLine)
-    exit 1
-}
-""";
+
 }
 
-#if !STEAM_TEST
+#if !STEAM_CORE_ONLY
 internal sealed class SteamLaunchPage : Grid
 {
     private SteamLaunch service = null!;
@@ -686,7 +619,7 @@ internal sealed class SteamLaunchPage : Grid
         games.ItemClick += async (_, _) =>
         {
             games.Visibility = Visibility.Collapsed; form.Visibility = back.Visibility = Visibility.Visible; title.Text = SteamLaunch.GameName;
-            await Run(() => Task.Run(service.EnsureScript)); await CheckVersion();
+            await CheckVersion();
         };
         back.Click += (_, _) => ShowGames();
         ReloadSteamLocations();

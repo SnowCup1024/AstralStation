@@ -1,29 +1,42 @@
 [CmdletBinding()]
-param()
+param([string]$InnoCompiler)
 $ErrorActionPreference = 'Stop'
 Push-Location -LiteralPath $PSScriptRoot
 try {
-    $release = '.build/Alpha-10.0'
-    $vpk = '.build/Tools/vpk.exe'
-    if (!(Test-Path -LiteralPath $vpk)) {
-        dotnet tool install vpk --tool-path .build/Tools --version 1.3.39-g8d2844f
-        if ($LASTEXITCODE -ne 0) { throw '安装打包工具失败。' }
-    }
-    dotnet publish App/AstralStation.csproj -c Release -r win-x64 --self-contained true -o "$release/App"
-    if ($LASTEXITCODE -ne 0) { throw '发布失败。' }
-    dotnet publish Monitor/AstralStation.Monitor.csproj -c Release -r win-x64 --self-contained true -o "$release/App/Monitor"
-    if ($LASTEXITCODE -ne 0) { throw '后台程序发布失败。' }
-    [xml]$project = Get-Content -LiteralPath App/AstralStation.csproj
-    $version = [string]$project.Project.PropertyGroup[0].Version
-    # Rebuilding a failed/repaired version must not reuse an index for that same version.
+    [xml]$metadata = Get-Content -LiteralPath Directory.Build.props
+    $display = [string]$metadata.Project.PropertyGroup.AstralDisplayVersion
+    $version = [string]$metadata.Project.PropertyGroup.Version
+    $revision = [int]($version -replace '^.*-alpha\.', '')
     $buildRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '.build'))
-    $installer = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "$release/Installer"))
-    if (!$installer.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw '输出目录越界。' }
-    if (Test-Path -LiteralPath $installer) {
-        if ((Get-Item -LiteralPath $installer).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '输出目录不能为链接。' }
-        Remove-Item -LiteralPath $installer -Recurse -Force
+    $stage = Join-Path $buildRoot 'Stage/App'
+    $release = Join-Path $buildRoot ('Alpha-' + $display)
+    if (!$InnoCompiler) {
+        $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+        if ($command) { $InnoCompiler = $command.Source }
+        elseif (Test-Path -LiteralPath (Join-Path $buildRoot 'Tools/Inno/ISCC.exe')) {
+            $InnoCompiler = Join-Path $buildRoot 'Tools/Inno/ISCC.exe'
+        } else { throw '请准备官方 Inno Setup 7.1 编译器，并通过 -InnoCompiler 指定 ISCC.exe。构建脚本不会下载安装工具。' }
     }
-    & $vpk pack --packId SnowCup1024.AstralStation --packVersion $version --packTitle '星间驿站' --packAuthors SnowCup1024 --packDir "$release/App" --mainExe AstralStation.exe --runtime win-x64 --channel alpha --icon App/Assets/App.ico --outputDir "$release/Installer"
-    if ($LASTEXITCODE -ne 0) { throw '安装器打包失败。' }
-    Get-ChildItem "$release/Installer" -Filter '*Setup.exe' | Select-Object FullName,Length
+    if (!(Test-Path -LiteralPath $InnoCompiler -PathType Leaf)) { throw '找不到 Inno Setup 编译器。' }
+    function Clear-Generated([string]$path) {
+        $absolute = [IO.Path]::GetFullPath($path)
+        if (!$absolute.StartsWith($buildRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '输出目录越界。' }
+        if (Test-Path -LiteralPath $absolute) {
+            $cursor = Get-Item -LiteralPath $absolute
+            while ($cursor -and $cursor.FullName.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                if ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '输出目录不能经过链接。' }
+                $cursor = $cursor.Parent
+            }
+            Remove-Item -LiteralPath $absolute -Recurse -Force
+        }
+    }
+    Clear-Generated $stage
+    Clear-Generated $release
+    dotnet publish App/AstralStation.csproj -c Release -r win-x64 --self-contained true -o $stage
+    if ($LASTEXITCODE -ne 0) { throw '应用发布失败。' }
+    dotnet publish Monitor/AstralStation.Monitor.csproj -c Release -r win-x64 --self-contained true -o (Join-Path $stage 'Monitor')
+    if ($LASTEXITCODE -ne 0) { throw '后台发布失败。' }
+    & $InnoCompiler ('/DSourcePath='+$stage) ('/DOutputPath='+$release) ('/DDisplayVersion='+$display) ('/DFileVersion=1.0.0.'+$revision) ('/DAppIcon='+(Join-Path $PSScriptRoot 'App/Assets/App.ico')) (Join-Path $PSScriptRoot 'Installer/Setup.iss')
+    if ($LASTEXITCODE -ne 0) { throw '安装器构建失败。' }
+    Get-Item -LiteralPath (Join-Path $release ('AstralStation-Alpha-'+$display+'-Setup.exe')) | Select-Object FullName,Length
 } finally { Pop-Location }

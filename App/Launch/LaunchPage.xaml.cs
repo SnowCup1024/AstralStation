@@ -18,9 +18,7 @@ public sealed partial class LaunchPage : UserControl
     private readonly ObservableCollection<LaunchTask> library = [];
     private bool ready, commandBusy;
     private IDisposable? reorderScope;
-    public bool IsQueue => Tabs.SelectedIndex == 0;
     public bool IsLibrary => Tabs.SelectedIndex == 1;
-    public event Action? SectionChanged;
     public LaunchPage(LaunchSession session, Dialogs dialogs)
     {
         this.session = session; this.dialogs = dialogs;
@@ -69,7 +67,7 @@ public sealed partial class LaunchPage : UserControl
         QueueLayout.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
         QueueLayout.RowDefinitions[1].Height = new GridLength(0);
     }
-    private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); SectionChanged?.Invoke(); }
+    private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); }
     private void SelectionChanged(object sender, SelectionChangedEventArgs e) => Refresh();
     private static void ClearEmptySelection(object sender, PointerRoutedEventArgs e)
     {

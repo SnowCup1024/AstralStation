@@ -160,7 +160,7 @@ public sealed class DesktopHost : IDisposable
                 (string.Equals(target, LoginTarget(root), StringComparison.OrdinalIgnoreCase) || HasNewerLoginTarget(command!));
         }
     }
-    // Repair enabled entries only. The persistent copy survives cleanup of build directories.
+    // Repair enabled entries only; installed updates keep the user-selected executable path.
     public static void RefreshLoginTarget(string dataRoot)
     {
         if (!AppUpdates.Installed) return;
@@ -188,12 +188,7 @@ public sealed class DesktopHost : IDisposable
                 string.Equals(RegisteredLoginTarget(key!.GetValue(name) as string), AppUpdates.InstalledExe, StringComparison.OrdinalIgnoreCase))
                 key.DeleteValue(name, false);
     }
-    public static string Quote(string value)
-    {
-        var result = new StringBuilder("\""); int slashes = 0;
-        foreach (char c in value) { if (c == '\\') { slashes++; continue; } result.Append('\\', c == '"' ? slashes * 2 + 1 : slashes); result.Append(c); slashes = 0; }
-        return result.Append('\\', slashes * 2).Append('"').ToString();
-    }
+    public static string Quote(string value) => AstralStation.Monitoring.SteamBridge.Quote(value);
     public static void OpenFolder(string path)
     {
         if (File.Exists(path)) Process.Start(new ProcessStartInfo("explorer.exe", "/select," + Quote(Path.GetFullPath(path))) { UseShellExecute = true });

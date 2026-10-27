@@ -1,6 +1,5 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
-using Velopack;
 
 namespace AstralStation;
 
@@ -9,19 +8,19 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        // Installer hooks must run before WinUI, the instance mutex or user data are opened.
-        VelopackApp.Build().SetAutoApplyOnStartup(false)
-            .OnBeforeUninstallFastCallback(_ =>
-            {
-                new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
-                Services.MonitorClient.RemoveLogin(); Services.DesktopHost.RemoveDefaultLogin();
-            })
-            .OnBeforeUpdateFastCallback(_ =>
+        var arguments = Environment.GetCommandLineArgs();
+        if (arguments.Contains("--installer-prepare") || arguments.Contains("--installer-uninstall"))
+        {
+            try
             {
                 Monitoring.SteamBridge.RequireIdle();
                 new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
-            })
-            .Run();
+                if (arguments.Contains("--installer-uninstall"))
+                { Services.MonitorClient.RemoveLogin(); Services.DesktopHost.RemoveDefaultLogin(); }
+            }
+            catch { Environment.ExitCode = 1; }
+            return;
+        }
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>
         {

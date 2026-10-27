@@ -1,70 +1,77 @@
-using AstralStation.Launch;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Velopack;
-using Velopack.Locators;
-using Velopack.Sources;
+using Microsoft.Win32;
+using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace AstralStation.Services;
 
 public static class AppUpdates
 {
     public const string Repository = "https://github.com/SnowCup1024/AstralStation";
-    public static bool Installed => VelopackLocator.Current.CurrentlyInstalledVersion is not null;
-    public static string? InstalledExe => Installed ? Path.Combine(VelopackLocator.Current.AppContentDir!, "AstralStation.exe") : null;
-
-    public static Border Card(LaunchSession session, Dialogs dialogs, Func<Task> prepareRestart, Func<Task> resumeAfterFailure)
+    public static string DisplayVersion => typeof(AppUpdates).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == "AstralDisplayVersion").Value!;
+    public static string? InstalledExe
+    {
+        get
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\AstralStation");
+            string? root = key?.GetValue("InstallDir") as string;
+            if (root is null || !Path.IsPathFullyQualified(root)) return null;
+            string exe = Path.Combine(root, "AstralStation.exe");
+            return File.Exists(exe) && string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), StringComparison.OrdinalIgnoreCase) ? exe : null;
+        }
+    }
+    public static bool Installed => InstalledExe is not null;
+    private static bool SetupName(string path) => Regex.IsMatch(Path.GetFileName(path), @"^AstralStation-Alpha-[0-9]+(?:\.[0-9]+){1,2}-Setup\.exe$", RegexOptions.CultureInvariant);
+    private static void Open(string target) { using var process = Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
+    public static Border Card(Dialogs dialogs)
     {
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock { Text = "安装与更新", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
-        var status = new TextBlock { Text = Installed ? "已安装 · Alpha 更新通道" : "当前是开发目录运行。请先运行安装器，再使用应用内更新和登录启动。", TextWrapping = TextWrapping.Wrap };
-        var check = new Button { Content = "检查更新", IsEnabled = Installed };
-        var local = new Button { Content = "选择本地更新目录", IsEnabled = Installed };
-        var apply = new Button { Content = "下载并安装更新", Visibility = Visibility.Collapsed };
+        var status = new TextBlock { Text = "安装和更新都使用同一个 Setup.exe。首次安装必须手动选择目录；更新可沿用已有安装位置，安装前会显示确认。卸载时可选择保留或删除本地数据。", TextWrapping = TextWrapping.Wrap };
+        var check = new Button { Content = "检查更新" };
+        var local = new Button { Content = "打开本地安装包" };
+        var download = new Button { Content = "打开下载页", Visibility = Visibility.Collapsed };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        buttons.Children.Add(check); buttons.Children.Add(local); buttons.Children.Add(apply);
+        buttons.Children.Add(check); buttons.Children.Add(local); buttons.Children.Add(download);
         panel.Children.Add(status); panel.Children.Add(buttons);
-        UpdateManager? manager = null; UpdateInfo? update = null; bool busy = false;
-        async Task Check(string? folder)
+        string? releasePage = null;
+        check.Click += async (_, _) =>
         {
-            if (busy) return;
-            busy = true; check.IsEnabled = local.IsEnabled = apply.IsEnabled = false;
+            check.IsEnabled = false; download.Visibility = Visibility.Collapsed;
             using var scope = dialogs.Interaction();
             try
             {
-                status.Text = "正在检查更新…"; update = null; apply.Visibility = Visibility.Collapsed;
-                manager = folder is null
-                    ? new UpdateManager(new GithubSource(Repository, null, true), new UpdateOptions { ExplicitChannel = "alpha" })
-                    : new UpdateManager(folder, new UpdateOptions { ExplicitChannel = "alpha" });
-                update = await manager.CheckForUpdatesAsync();
-                status.Text = update is null ? "当前已是更新源中的最新版本。" : "可更新至 " + update.TargetFullRelease.Version;
-                apply.Visibility = update is null ? Visibility.Collapsed : Visibility.Visible;
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 4 * 1024 * 1024 };
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstralStation/" + DisplayVersion);
+                using var json = JsonDocument.Parse(await client.GetStringAsync("https://api.github.com/repos/SnowCup1024/AstralStation/releases?per_page=20"));
+                string current = typeof(AppUpdates).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+                string latest = current;
+                foreach (var release in json.RootElement.EnumerateArray())
+                {
+                    string version = release.GetProperty("tag_name").GetString()?.TrimStart('v') ?? "";
+                    if (release.GetProperty("draft").GetBoolean() || DesktopHost.CompareVersions(version, latest) <= 0 || !release.GetProperty("assets").EnumerateArray().Any(a => SetupName(a.GetProperty("name").GetString() ?? ""))) continue;
+                    latest = version;
+                    releasePage = release.GetProperty("html_url").GetString();
+                }
+                download.Visibility = latest == current ? Visibility.Collapsed : Visibility.Visible;
+                status.Text = latest == current ? "没有可用的新版 Setup 安装包。" : "可更新至 " + latest + "，请下载并运行同一个安装程序。";
             }
             catch (Exception ex) { status.Text = "检查失败，可重试：" + ex.Message; }
-            finally { busy = false; check.IsEnabled = local.IsEnabled = apply.IsEnabled = true; }
-        }
-        check.Click += async (_, _) => await Check(null);
-        local.Click += async (_, _) => { if (busy) return; var folder = await dialogs.PickFolder(); if (folder is not null) await Check(folder); };
-        apply.Click += async (_, _) =>
+            finally { check.IsEnabled = true; }
+        };
+        download.Click += async (_, _) => { try { if (releasePage is not null && releasePage.StartsWith(Repository + "/releases/", StringComparison.Ordinal)) Open(releasePage); } catch (Exception ex) { await dialogs.Error(ex.Message); } };
+        local.Click += async (_, _) =>
         {
-            if (busy || manager is null || update is null || dialogs.Busy) return;
-            using var scope = dialogs.Interaction();
-            if (!await dialogs.Confirm("安装更新", "将下载更新、保存当前任务的监测状态并重新打开应用。游戏继续运行。")) return;
-            busy = true; check.IsEnabled = local.IsEnabled = apply.IsEnabled = false;
             try
             {
-                var progress = new Progress<int>(p => status.Text = $"正在下载更新 · {p}%");
-                await manager.DownloadUpdatesAsync(update, ((IProgress<int>)progress).Report);
-                await prepareRestart();
-                manager.ApplyUpdatesAndRestart(update.TargetFullRelease, ["--data-dir", session.Store.Root]);
+                string? file = await dialogs.Pick(".exe"); if (file is null) return;
+                if (!SetupName(file)) throw new InvalidOperationException("请选择 AstralStation-Alpha-版本-Setup.exe 安装包。");
+                Open(file);
             }
-            catch (Exception ex)
-            {
-                status.Text = "更新未完成，可重试：" + ex.Message;
-                try { File.Delete(session.Store.FileAt("handoff.json")); await resumeAfterFailure(); }
-                catch (Exception recovery) { session.Store.Fail("更新取消后的状态恢复失败：" + recovery.Message); status.Text += "\n" + recovery.Message; }
-            }
-            finally { busy = false; check.IsEnabled = local.IsEnabled = apply.IsEnabled = true; }
+            catch (Exception ex) { await dialogs.Error(ex.Message); }
         };
         return new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = panel };
     }

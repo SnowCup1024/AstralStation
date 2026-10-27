@@ -5,7 +5,6 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>AstralStation</RootNamespace>
     <AssemblyName>AstralStation</AssemblyName>
-    <Version>1.0.0-alpha.100</Version>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <ApplicationIcon>Assets/App.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -31,6 +30,5 @@
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.1.3" />
     <EmbeddedResource Include="Assets/App.ico" LogicalName="AstralStation.App.ico" />
     <Content Update="Assets/App.png" CopyToOutputDirectory="PreserveNewest" />
-    <PackageReference Include="Velopack" Version="1.3.39-g8d2844f" />
   </ItemGroup>
 </Project>

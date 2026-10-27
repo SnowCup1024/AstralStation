@@ -1,7 +1,15 @@
 <Project>
   <PropertyGroup>
+    <Version>1.0.0-alpha.101</Version>
+    <AstralDisplayVersion>10.1</AstralDisplayVersion>
     <BaseOutputPath>$(MSBuildThisFileDirectory).build/Output/$(MSBuildProjectName)/</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory).build/Obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>AstralDisplayVersion</_Parameter1>
+      <_Parameter2>$(AstralDisplayVersion)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>
