@@ -60,7 +60,6 @@
 </Border>
     </Grid>
    </PivotItem>
-   <PivotItem Margin="0" AutomationProperties.Name="运行日历"><PivotItem.Header><TextBlock Text="运行日历" FontSize="17"/></PivotItem.Header><ContentControl x:Name="CalendarHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/></PivotItem>
 
   </Pivot>
  </Grid>

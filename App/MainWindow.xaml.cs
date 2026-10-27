@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         UpdateCaptionTheme();
         try { desktop.SetTray(session.Store.Settings.Tray); } catch (Exception ex) { session.Store.Fail(ex.Message); }
         routes["launch"] = () => launchPage = new(session, dialogs);
+        routes["calendar"] = Calendar;
         routes["steam"] = () =>
         {
             var args = Environment.GetCommandLineArgs();
@@ -58,7 +59,7 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) { return Intro("Steam 启动国服", "无法读取配置", ex.Message); }
         };
         routes["settings"] = Settings;
-        routes["about"] = () => Intro("关于星间驿站", "Alpha 5.1", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
+        routes["about"] = () => Intro("关于星间驿站", "Alpha 5.2", "属于自己的游戏工具集合。\n\nC# · WinUI\n仅提供简体中文界面。");
         Navigation.SelectedItem = Navigation.MenuItems[0];
         session.RunsChanged += events => { foreach (var item in events) { if (item.Started) { completionEligible = true; keepOpen = false; if (item.LaunchedHere) running[item.Serial] = new(item.Task); CancelCountdown(); } else running.Remove(item.Serial); } };
         session.Changed += UpdateLifecycle;
@@ -116,6 +117,16 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = content });
         return panel;
     }
+    private FrameworkElement Calendar()
+    {
+        var panel = new Grid { Margin = new(16, 12, 16, 12), RowSpacing = 16 };
+        panel.RowDefinitions.Add(new() { Height = GridLength.Auto }); panel.RowDefinitions.Add(new());
+        panel.Children.Add(new TextBlock { Text = "运行日历", Style = (Style)Application.Current.Resources["PageTitleStyle"] });
+        var history = new HistoryView(session, dialogs); panel.Children.Add(history); Grid.SetRow(history, 1);
+        panel.Loaded += (_, _) => history.RefreshIfNeeded(true);
+        session.Changed += () => { if (panel.IsLoaded) history.RefreshIfNeeded(); };
+        return panel;
+    }
     private void UpdateCaptionTheme()
     {
         if (!AppWindowTitleBar.IsCustomizationSupported()) return;
@@ -137,9 +148,9 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(AppUpdates.Card(session, dialogs, async () =>
         {
             if (session.Store.Error is not null || session.Scheduler.Launching) throw new InvalidOperationException("任务记录保存失败或正在启动，请稍后更新。");
-            session.Scheduler.SaveHandoff();
             await monitor.Stop();
-        }));
+            session.Scheduler.SaveHandoff();
+        }, monitor.EnsureStarted));
         var launch = new StackPanel { Spacing = 12 };
         launch.Children.Add(new TextBlock { Text = "启动管理", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
         var autoClose = new ComboBox { ItemsSource = new[] { "保持打开", "倒计时 15 秒后退出" }, Width = 220 };

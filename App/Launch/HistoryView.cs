@@ -1,4 +1,5 @@
 using AstralStation.Services;
+using AstralStation.Monitoring;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -25,6 +26,8 @@ public sealed class HistoryView : Grid
     private List<string> available = [];
     private string? selected;
     private int revision = -1;
+    private long monitorRevision = -1;
+    private List<string> loadErrors = [];
     private DateTime lastDay;
     private bool interacting;
     public HistoryView(LaunchSession session, Dialogs dialogs)
@@ -117,19 +120,20 @@ public sealed class HistoryView : Grid
     }
     public void RefreshIfNeeded(bool force = false)
     {
-        if (interacting || (!force && revision == session.Store.Revision && lastDay == DateTime.Today)) return;
+        if (interacting) return;
         try
         {
+            long currentMonitor = File.GetLastWriteTimeUtc(System.IO.Path.Combine(MonitorData.DirectoryAt(session.Store.Root), "active.json")).Ticks;
+            if (!force && revision == session.Store.Revision && monitorRevision == currentMonitor && lastDay == DateTime.Today) return;
             var result = session.Store.HistoryDates();
-            available = result.Dates.Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).ToList();
-            notice.Text = result.Errors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", result.Errors);
+            available = result.Dates.Concat(MonitorData.HistoryDates(session.Store.Root)).Distinct(StringComparer.Ordinal).Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).Order(StringComparer.Ordinal).ToList();
+            loadErrors = result.Errors;
             if (revision < 0)
             {
                 selected = DateTime.Today.ToString("yyyy-MM-dd");
                 month = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
             }
-            notice.Visibility = result.Errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-            revision = session.Store.Revision; lastDay = DateTime.Today;
+            revision = session.Store.Revision; monitorRevision = currentMonitor; lastDay = DateTime.Today;
             RenderMonth(); RenderRecords();
         }
         catch (Exception ex) { notice.Text = ex.Message; notice.Visibility = Visibility.Visible; }
@@ -151,12 +155,27 @@ public sealed class HistoryView : Grid
         if (selected is null) return;
         try
         {
-            foreach (var record in session.Store.Records(selected))
+            var entries = new List<LaunchRecord>(); var errors = new List<string>(loadErrors);
+            try { entries.AddRange(session.Store.Records(selected)); } catch (Exception ex) { errors.Add("启动队列：" + ex.Message); }
+            var monitored = new List<MonitorRecord>();
+            try { var result = MonitorData.Records(session.Store.Root, selected); monitored = result.Records; errors.AddRange(result.Errors); }
+            catch (Exception ex) { errors.Add("后台监测：" + ex.Message); }
+            foreach (var record in monitored)
+                entries.Add(new LaunchRecord
+                {
+                    Id = "monitor-" + record.Id, Name = record.Game.Name, Path = record.Game.Path, Date = selected,
+                    Time = record.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), EndTime = record.EndedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                    Source = "后台监测", Note = record.EndedAt is null ? "尚未记录退出时间" : record.EndReason == "进程退出" ? "" : record.EndReason
+                });
+            notice.Text = errors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", errors);
+            notice.Visibility = errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var record in entries.OrderBy(r => r.Time, StringComparer.Ordinal))
             {
                 var panel = new StackPanel { Spacing = 1 };
                 panel.VerticalAlignment = VerticalAlignment.Center;
                 panel.Children.Add(new TextBlock { Text = record.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
                 panel.Children.Add(new PathLabel { Text = record.Path }); panel.Children.Add(new TextBlock { Text = record.Summary, FontSize = 13, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis });
+                panel.Children.Add(new TextBlock { Text = record.Source + (record.Note.Length == 0 ? "" : " · " + record.Note), FontSize = 12, TextWrapping = TextWrapping.Wrap });
                 var row = new Grid { ColumnSpacing = 12 };
                 row.ColumnDefinitions.Add(new() { Width = new(52) }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
                 var icon = new GameIcon { Path = record.Path };

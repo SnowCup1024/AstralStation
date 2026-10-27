@@ -16,7 +16,6 @@ public sealed partial class LaunchPage : UserControl
     private readonly LaunchSession session;
     private readonly Dialogs dialogs;
     private readonly ObservableCollection<LaunchTask> library = [];
-    private readonly HistoryView history;
     private bool ready, commandBusy;
     private IDisposable? reorderScope;
     public bool IsQueue => Tabs.SelectedIndex == 0;
@@ -25,7 +24,7 @@ public sealed partial class LaunchPage : UserControl
     public LaunchPage(LaunchSession session, Dialogs dialogs)
     {
         this.session = session; this.dialogs = dialogs;
-        InitializeComponent(); history = new(session, dialogs); CalendarHost.Content = history;
+        InitializeComponent();
         RingLabel.Foreground = RingValue.Foreground = RingTask.Foreground = Progress.ProgressBrush;
         LibraryList.ItemsSource = library;
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
@@ -58,7 +57,6 @@ public sealed partial class LaunchPage : UserControl
         ClearButton.Visibility = selectedDone ? Visibility.Visible : Visibility.Collapsed;
         QueueActions.Visibility = QueueList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
         LibraryActions.Visibility = LibraryList.SelectedItem is LaunchTask ? Visibility.Visible : Visibility.Collapsed;
-        if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded();
     }
     private void QueueSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -71,7 +69,7 @@ public sealed partial class LaunchPage : UserControl
         QueueLayout.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
         QueueLayout.RowDefinitions[1].Height = new GridLength(0);
     }
-    private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); if (Tabs.SelectedIndex == 2) history.RefreshIfNeeded(true); SectionChanged?.Invoke(); }
+    private void TabChanged(object sender, SelectionChangedEventArgs e) { if (!ready || !ReferenceEquals(e.OriginalSource, Tabs)) return; session.SetManaging(Tabs.SelectedIndex == 1); SectionChanged?.Invoke(); }
     private void SelectionChanged(object sender, SelectionChangedEventArgs e) => Refresh();
     private static void ClearEmptySelection(object sender, PointerRoutedEventArgs e)
     {

@@ -82,4 +82,32 @@ public static class MonitorData
         if (!Guid.TryParseExact(record.Id, "N", out _)) throw new InvalidDataException("监测记录 ID 无效。");
         return System.IO.Path.Combine(DirectoryAt(root), "History", record.StartedAt.ToLocalTime().ToString("yyyy-MM-dd"), record.Id + ".json");
     }
+    public static List<string> HistoryDates(string root)
+    {
+        string folder = System.IO.Path.Combine(DirectoryAt(root), "History");
+        if (!Directory.Exists(folder)) return [];
+        return Directory.EnumerateDirectories(folder).Select(System.IO.Path.GetFileName)
+            .Where(name => DateTime.TryParseExact(name, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
+            .Select(name => name!).Order(StringComparer.Ordinal).ToList();
+    }
+    public static (List<MonitorRecord> Records, List<string> Errors) Records(string root, string date)
+    {
+        if (!DateTime.TryParseExact(date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)) throw new InvalidDataException("无效的监测记录日期。");
+        var records = new List<MonitorRecord>(); var errors = new List<string>();
+        string folder = System.IO.Path.Combine(DirectoryAt(root), "History", date);
+        if (!Directory.Exists(folder)) return (records, errors);
+        foreach (string file in Directory.EnumerateFiles(folder, "*.json"))
+        {
+            try
+            {
+                var record = Read<MonitorRecord>(file); record.Game.Validate();
+                if (!string.Equals(RecordPath(root, record), System.IO.Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase)
+                    || record.ProcessId <= 0 || record.CreatedUtcTicks <= 0 || record.EndReason is null || record.StartedAt == default || record.LastSeenAt < record.StartedAt || record.EndedAt < record.StartedAt)
+                    throw new InvalidDataException("记录身份、日期或起止时间无效。");
+                records.Add(record);
+            }
+            catch (Exception ex) { errors.Add(System.IO.Path.GetFileName(file) + "：" + ex.Message); }
+        }
+        return (records.OrderBy(r => r.StartedAt).ToList(), errors);
+    }
 }

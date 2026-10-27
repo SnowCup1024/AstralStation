@@ -7,13 +7,14 @@
    <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0" VerticalAlignment="Center">
     <Image Source="ms-appx:///Assets/App.png" Width="20" Height="20"/>
     <TextBlock Text="星间驿站" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    <TextBlock Text="Alpha 5.1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="13"/>
+    <TextBlock Text="Alpha 5.2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" FontSize="13"/>
    </StackPanel>
   </Grid>
   <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="LeftCompact" OpenPaneLength="208"
    IsBackButtonVisible="Collapsed" IsSettingsVisible="False" SelectionChanged="Navigate" ItemInvoked="NavigationInvoked">
    <NavigationView.MenuItems>
     <NavigationViewItem Content="启动管理" Tag="launch"><NavigationViewItem.Icon><FontIcon Glyph="&#xE768;"/></NavigationViewItem.Icon></NavigationViewItem>
+    <NavigationViewItem Content="运行日历" Tag="calendar"><NavigationViewItem.Icon><FontIcon Glyph="&#xE787;"/></NavigationViewItem.Icon></NavigationViewItem>
     <NavigationViewItem Content="Steam 启动国服" Tag="steam"><NavigationViewItem.Icon><FontIcon Glyph="&#xE7FC;"/></NavigationViewItem.Icon></NavigationViewItem>
    </NavigationView.MenuItems>
    <NavigationView.FooterMenuItems>

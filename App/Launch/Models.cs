@@ -62,8 +62,10 @@ public sealed class LaunchRecord
     public string EndTime { get; set; } = "";
     public int? ResetSeconds { get; set; }
     [JsonIgnore] public string Date { get; set; } = "";
+    [JsonIgnore] public string Source { get; set; } = "启动队列";
+    [JsonIgnore] public string Note { get; set; } = "";
     [JsonIgnore] public string Summary => Format(Time) + (string.IsNullOrEmpty(EndTime) ? "" : " — " + Format(EndTime)) + (ResetSeconds is int reset ? $"（{TimeSpan.FromSeconds(reset):hh\\:mm}重置）" : "");
-    [JsonIgnore] public string CopyText => $"{Name}\n{Path}\n{Date}\n{Summary}";
+    [JsonIgnore] public string CopyText => $"{Name}\n{Path}\n{Date}\n{Summary}\n{Source}" + (Note.Length == 0 ? "" : "\n" + Note);
     private string Format(string stamp)
     {
         var date = DateTime.ParseExact(stamp, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);

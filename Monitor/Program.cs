@@ -66,7 +66,12 @@ internal sealed class MonitorEngine(string root)
                     if (!loaded)
                     {
                         active = File.Exists(activeFile) ? MonitorData.Read<List<MonitorRecord>>(activeFile) : [];
-                        foreach (var record in active) { record.Game.Validate(); _ = MonitorData.RecordPath(root, record); }
+                        foreach (var record in active.ToArray())
+                        {
+                            record.Game.Validate(); string file = MonitorData.RecordPath(root, record);
+                            // Finish may have committed just before a crash interrupted the active checkpoint.
+                            if (File.Exists(file) && MonitorData.Read<MonitorRecord>(file).EndedAt is not null) active.Remove(record);
+                        }
                         loaded = true;
                     }
                     var config = MonitorData.ReadConfig(root);

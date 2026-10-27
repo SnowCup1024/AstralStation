@@ -13,7 +13,7 @@ public static class AppUpdates
     public static bool Installed => VelopackLocator.Current.CurrentlyInstalledVersion is not null;
     public static string? InstalledExe => Installed ? Path.Combine(VelopackLocator.Current.AppContentDir!, "AstralStation.exe") : null;
 
-    public static Border Card(LaunchSession session, Dialogs dialogs, Func<Task> prepareRestart)
+    public static Border Card(LaunchSession session, Dialogs dialogs, Func<Task> prepareRestart, Func<Task> resumeAfterFailure)
     {
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(new TextBlock { Text = "安装与更新", Style = (Style)Application.Current.Resources["SectionTitleStyle"] });
@@ -58,7 +58,12 @@ public static class AppUpdates
                 await prepareRestart();
                 manager.ApplyUpdatesAndRestart(update.TargetFullRelease, ["--data-dir", session.Store.Root]);
             }
-            catch (Exception ex) { status.Text = "更新未完成，可重试：" + ex.Message; }
+            catch (Exception ex)
+            {
+                status.Text = "更新未完成，可重试：" + ex.Message;
+                try { File.Delete(session.Store.FileAt("handoff.json")); await resumeAfterFailure(); }
+                catch (Exception recovery) { session.Store.Fail("更新取消后的状态恢复失败：" + recovery.Message); status.Text += "\n" + recovery.Message; }
+            }
             finally { busy = false; check.IsEnabled = local.IsEnabled = apply.IsEnabled = true; }
         };
         return new Border { Style = (Style)Application.Current.Resources["SectionCard"], Child = panel };
