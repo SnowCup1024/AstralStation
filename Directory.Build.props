@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
-    <Version>1.0.0-alpha.103</Version>
-    <AstralDisplayVersion>10.3</AstralDisplayVersion>
+    <Version>1.0.0-alpha.104</Version>
+    <AstralDisplayVersion>10.4</AstralDisplayVersion>
     <BaseOutputPath>$(MSBuildThisFileDirectory).build/Output/$(MSBuildProjectName)/</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory).build/Obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <Deterministic>true</Deterministic>

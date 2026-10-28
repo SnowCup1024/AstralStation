@@ -31,6 +31,7 @@ public sealed class SteamRuntime
 }
 public sealed record ProcessIdentity(int Id, long Created, string Path);
 public sealed record BridgeStatus(int Protocol, int ProcessId, long Created, string Executable, string GamePath, string Session, bool SeenGame, string State, string? Error);
+internal sealed record SteamAttachRequest(int Schema, string Id, string GamePath, DateTimeOffset RequestedAt);
 
 public static class SteamBridge
 {
@@ -41,6 +42,34 @@ public static class SteamBridge
         File.Exists(Path.Combine(AppContext.BaseDirectory, "AstralStation.Monitor.exe")) ? "" : "Monitor", "AstralStation.Monitor.exe");
     public static string PipeName(string config) => MonitorData.Identity(Path.GetFullPath(config)) + ".SteamBridge";
     public static string Options(string executable, string config) => Quote(executable) + " --steam-bridge --config " + Quote(config) + " %command%";
+    private static string AttachPath(string config) => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(config))!, "attach-request.json");
+    internal static string RequestAttach(string config, string gamePath)
+    {
+        string id = Guid.NewGuid().ToString("N");
+        AstralStation.SteamLaunch.NoLinks(AttachPath(config));
+        MonitorData.Atomic(AttachPath(config), new SteamAttachRequest(1, id, Path.GetFullPath(gamePath), DateTimeOffset.Now));
+        return id;
+    }
+    internal static bool TakeAttach(string config, string gamePath)
+    {
+        string file = AttachPath(config);
+        AstralStation.SteamLaunch.NoLinks(file);
+        if (!File.Exists(file)) return false;
+        // Even a delayed Steam launch must remain attach-only. Never expire an automatic
+        // request into permission to open a launcher; malformed requests also fail closed.
+        var request = MonitorData.Read<SteamAttachRequest>(file);
+        if (request.Schema != 1 || !Guid.TryParseExact(request.Id, "N", out _) || request.RequestedAt == default
+            || !string.Equals(request.GamePath, gamePath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("自动联动请求无效，已停止等待，不会打开启动器。");
+        File.Delete(file);
+        return true;
+    }
+    internal static void CancelAttach(string config, string id)
+    {
+        string file = AttachPath(config);
+        AstralStation.SteamLaunch.NoLinks(file);
+        if (File.Exists(file) && MonitorData.Read<SteamAttachRequest>(file).Id == id) File.Delete(file);
+    }
     public static string Quote(string value)
     {
         var result = new StringBuilder("\""); int slashes = 0;

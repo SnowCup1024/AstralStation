@@ -24,6 +24,8 @@ public sealed class HistoryView : Grid
     private readonly TextBlock notice = new() { Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap, FontSize = 13 };
     private readonly ListView records = new() { SelectionMode = ListViewSelectionMode.Single, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private List<string> available = [];
+    private List<LaunchRecord> merged = [];
+    private readonly Dictionary<string, (string Stamp, List<LaunchRecord> Records, List<string> Errors)> dateCache = [];
     private string? selected;
     private int revision = -1;
     private long monitorRevision = -1;
@@ -126,8 +128,35 @@ public sealed class HistoryView : Grid
             long currentMonitor = File.GetLastWriteTimeUtc(System.IO.Path.Combine(MonitorData.DirectoryAt(session.Store.Root), "active.json")).Ticks;
             if (!force && revision == session.Store.Revision && monitorRevision == currentMonitor && lastDay == DateTime.Today) return;
             var result = session.Store.HistoryDates();
-            available = result.Dates.Concat(MonitorData.HistoryDates(session.Store.Root)).Distinct(StringComparer.Ordinal).Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).Order(StringComparer.Ordinal).ToList();
+            var dates = result.Dates.Concat(MonitorData.HistoryDates(session.Store.Root)).Distinct(StringComparer.Ordinal).Where(d => string.CompareOrdinal(d, DateTime.Today.ToString("yyyy-MM-dd")) <= 0).Order(StringComparer.Ordinal).ToList();
             loadErrors = result.Errors;
+            var entries = new List<LaunchRecord>();
+            foreach (string date in dates)
+            {
+                var day = ReadEntries(date); entries.AddRange(day.Records); loadErrors.AddRange(day.Errors);
+            }
+            foreach (string removed in dateCache.Keys.Except(dates).ToArray()) dateCache.Remove(removed);
+            // Queue records may point to a shortcut. Link them through the existing queue ID
+            // to the actual observed EXE, without guessing identity from a game's display name.
+            var queuePaths = entries.Where(e => e.GameKey.StartsWith("queue:", StringComparison.Ordinal))
+                .GroupBy(e => e.GameKey).ToDictionary(g => g.Key, g => g.Select(e => e.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+            foreach (var record in entries.Where(r => !r.Id.StartsWith("monitor-", StringComparison.Ordinal)))
+            {
+                var task = session.Store.Tasks.FirstOrDefault(t => string.Equals(t.Path, record.Path, StringComparison.OrdinalIgnoreCase) && t.Name == record.Name);
+                record.GameKey = task is not null && queuePaths.TryGetValue("queue:" + task.Id, out var paths) && paths.Length == 1 ? paths[0] : "";
+            }
+            foreach (var record in entries.Where(e => e.GameKey.StartsWith("queue:", StringComparison.Ordinal))) record.GameKey = record.Path;
+            string activeFile = System.IO.Path.Combine(MonitorData.DirectoryAt(session.Store.Root), "active.json");
+            if (File.Exists(activeFile))
+                try
+                {
+                    var active = MonitorData.Read<List<MonitorRecord>>(activeFile).ToDictionary(r => "monitor-" + r.Id);
+                    foreach (var record in entries)
+                        if (active.TryGetValue(record.Id, out var running)) record.LastObservedAt = running.LastSeenAt.LocalDateTime;
+                }
+                catch (Exception ex) { loadErrors.Add("后台检查点：" + ex.Message); }
+            merged = LaunchRecord.Merge(entries);
+            available = merged.Select(r => r.Date).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             if (revision < 0)
             {
                 selected = DateTime.Today.ToString("yyyy-MM-dd");
@@ -146,6 +175,37 @@ public sealed class HistoryView : Grid
             : available.LastOrDefault(d => d.StartsWith(month.ToString("yyyy-MM")));
         RenderMonth(); RenderRecords();
     }
+    private (string Stamp, List<LaunchRecord> Records, List<string> Errors) ReadEntries(string date)
+    {
+        string queue = session.Store.FileAt($"History/{date}.json");
+        string folder = System.IO.Path.Combine(MonitorData.DirectoryAt(session.Store.Root), "History", date);
+        var files = new[] { queue }.Concat(Directory.Exists(folder) ? Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal) : []);
+        string stamp = string.Join('|', files.Select(file => { var info = new FileInfo(file); return file + ":" + (info.Exists ? $"{info.LastWriteTimeUtc.Ticks}:{info.Length}" : "missing"); }));
+        if (dateCache.TryGetValue(date, out var cached) && cached.Stamp == stamp && cached.Errors.Count == 0)
+            return (cached.Stamp, cached.Records.Select(Clone).ToList(), cached.Errors);
+        var entries = new List<LaunchRecord>(); var errors = new List<string>();
+        try { entries.AddRange(session.Store.Records(date)); } catch (Exception ex) { errors.Add(date + " 启动队列：" + ex.Message); }
+        try
+        {
+            var result = MonitorData.Records(session.Store.Root, date); errors.AddRange(result.Errors.Select(e => date + " 后台监测：" + e));
+            foreach (var record in result.Records)
+                entries.Add(new LaunchRecord
+                {
+                    Id = "monitor-" + record.Id, Name = record.Game.Name, Path = record.Game.Path, Date = date,
+                    Time = record.StartedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"), EndTime = record.EndedAt?.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+                    Source = record.Game.FromQueue ? "进程监测 · 今日队列" : "进程监测", GameKey = record.Game.FromQueue ? "queue:" + record.Game.QueueTaskId : "",
+                    LastObservedAt = record.LastSeenAt.LocalDateTime, Note = record.EndedAt is null ? "运行中" : record.EndReason == "进程退出" ? "" : record.EndReason
+                });
+        }
+        catch (Exception ex) { errors.Add(date + " 后台监测：" + ex.Message); }
+        dateCache[date] = (stamp, entries.Select(Clone).ToList(), errors);
+        return (stamp, entries, errors);
+    }
+    private static LaunchRecord Clone(LaunchRecord record) => new()
+    {
+        Id = record.Id, Name = record.Name, Path = record.Path, Date = record.Date, Time = record.Time, EndTime = record.EndTime,
+        Source = record.Source, Note = record.Note, ResetSeconds = record.ResetSeconds, GameKey = record.GameKey, LastObservedAt = record.LastObservedAt
+    };
     private void RenderRecords()
     {
         string? selectedId = (records.SelectedItem as ListViewItem)?.Tag is LaunchRecord old ? old.Id : null;
@@ -155,22 +215,9 @@ public sealed class HistoryView : Grid
         if (selected is null) return;
         try
         {
-            var entries = new List<LaunchRecord>(); var errors = new List<string>(loadErrors);
-            try { entries.AddRange(session.Store.Records(selected)); } catch (Exception ex) { errors.Add("启动队列：" + ex.Message); }
-            var monitored = new List<MonitorRecord>();
-            try { var result = MonitorData.Records(session.Store.Root, selected); monitored = result.Records; errors.AddRange(result.Errors); }
-            catch (Exception ex) { errors.Add("后台监测：" + ex.Message); }
-            foreach (var record in monitored)
-                entries.Add(new LaunchRecord
-                {
-                    Id = "monitor-" + record.Id, Name = record.Game.Name, Path = record.Game.Path, Date = selected,
-                    Time = record.StartedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), EndTime = record.EndedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "",
-                    Source = record.Game.FromQueue ? "进程监测 · 今日队列" : "进程监测",
-                    Note = record.EndedAt is null ? "运行中" : record.EndReason == "进程退出" ? "" : record.EndReason
-                });
-            notice.Text = errors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", errors);
-            notice.Visibility = errors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-            foreach (var record in entries.OrderBy(r => r.Time, StringComparer.Ordinal))
+            notice.Text = loadErrors.Count == 0 ? "" : "部分记录无法读取：\n" + string.Join("\n", loadErrors.Distinct());
+            notice.Visibility = loadErrors.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var record in merged.Where(r => r.Date == selected))
             {
                 var panel = new StackPanel { Spacing = 1 };
                 panel.VerticalAlignment = VerticalAlignment.Center;

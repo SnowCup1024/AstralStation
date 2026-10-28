@@ -24,22 +24,25 @@ internal sealed class SteamSession(string configPath)
         }
         using var cancellation = new CancellationTokenSource();
         Process? ownedLauncher = null; Task? server = null;
+        bool completed = false;
         try
         {
             runtime = SteamRuntime.Read(configPath);
+            bool attachOnly = SteamBridge.TakeAttach(configPath, runtime.GamePath);
             identity = SteamBridge.Identity(Environment.ProcessId) ?? throw new IOException("无法读取 Steam 等待进程身份。");
             server = Serve(cancellation);
             var initial = SteamBridge.Find(runtime.GamePath);
-            seen = initial.Processes.Count > 0;
+            seen = attachOnly || initial.Processes.Count > 0;
             bool requestedLauncher = false;
             var startedAt = Stopwatch.StartNew(); double? absentAt = null;
             void OpenLauncher()
             {
                 requestedLauncher = true; startedAt.Restart();
                 var launchers = SteamBridge.Find(runtime.Launcher);
+                if (launchers.Processes.Count > 0 || launchers.Uncertain)
+                { state = "等待现有启动器进入游戏"; return; }
                 var started = Process.Start(new ProcessStartInfo(runtime.Launcher) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(runtime.Launcher)!, Arguments = runtime.Arguments });
-                if (launchers.Processes.Count == 0 && !launchers.Uncertain) ownedLauncher = started;
-                else started?.Dispose();
+                ownedLauncher = started;
             }
             if (!seen && !initial.Uncertain) OpenLauncher();
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
@@ -51,12 +54,12 @@ internal sealed class SteamSession(string configPath)
                 else if (seen)
                 {
                     absentAt ??= startedAt.Elapsed.TotalSeconds; state = "等待游戏退出确认"; error = null;
-                    if (startedAt.Elapsed.TotalSeconds - absentAt >= runtime.ExitGraceSeconds) break;
+                    if (startedAt.Elapsed.TotalSeconds - absentAt >= runtime.ExitGraceSeconds) { completed = true; break; }
                 }
                 else
                 {
                     // If an initially inaccessible process disappears, launch only after its absence is confirmed.
-                    if (!requestedLauncher) OpenLauncher();
+                    if (!attachOnly && !requestedLauncher) OpenLauncher();
                     error = null;
                     if (startedAt.Elapsed.TotalSeconds >= runtime.WaitForGameSeconds)
                     { SteamBridge.ReportError(configPath, new TimeoutException("等待游戏启动超时，Steam 等待进程已退出。")); break; }
@@ -74,7 +77,7 @@ internal sealed class SteamSession(string configPath)
                 try
                 {
                     var game = SteamBridge.Find(runtime.GamePath);
-                    if (runtime.CloseOwnedLauncher && game.Processes.Count == 0 && !game.Uncertain && !ownedLauncher.HasExited) ownedLauncher.CloseMainWindow();
+                    if (completed && runtime.CloseOwnedLauncher && game.Processes.Count == 0 && !game.Uncertain && !ownedLauncher.HasExited) ownedLauncher.CloseMainWindow();
                 }
                 catch { }
                 ownedLauncher.Dispose();
@@ -141,12 +144,19 @@ internal sealed class SteamLinkController(Action<string>? request = null, Func<M
             }
             if (attempts >= 2) { State = "Steam 等待进程未出现，本次运行已停止重试。请检查 Steam 启动选项。"; return; }
             if (now < retryAfter) { State = "已请求 Steam 启动，正在等待进程登记…"; return; }
+            var currentGame = SteamBridge.Find(runtime.GamePath);
+            if (currentGame.Uncertain || currentGame.Processes.Count == 0) { State = "游戏已退出或身份无法确认，本轮不请求 Steam。"; return; }
             var setup = new SteamLaunch(Path.GetDirectoryName(config.SteamLinkConfigPath));
             if (!setup.Configured()) { State = "Steam 联动未生效：请在 Steam 游戏属性粘贴新版启动选项，确认 ACF 与空 EXE 已配置。"; return; }
             attempts++; retryAfter = now.AddSeconds(30);
             string uri = "steam://rungameid/" + SteamBridge.AppId;
-            if (request is not null) request(uri);
-            else using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden })) { }
+            string ticket = SteamBridge.RequestAttach(config.SteamLinkConfigPath, runtime.GamePath);
+            try
+            {
+                if (request is not null) request(uri);
+                else using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden })) { }
+            }
+            catch { SteamBridge.CancelAttach(config.SteamLinkConfigPath, ticket); throw; }
             State = "已请求 Steam 启动，等待进程将自动跟随游戏退出。";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }

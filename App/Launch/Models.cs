@@ -64,6 +64,8 @@ public sealed class LaunchRecord
     [JsonIgnore] public string Date { get; set; } = "";
     [JsonIgnore] public string Source { get; set; } = "启动队列";
     [JsonIgnore] public string Note { get; set; } = "";
+    [JsonIgnore] public string GameKey { get; set; } = "";
+    [JsonIgnore] public DateTime? LastObservedAt { get; set; }
     [JsonIgnore] public string Summary => Format(Time) + (string.IsNullOrEmpty(EndTime) ? "" : " — " + Format(EndTime)) + (ResetSeconds is int reset ? $"（{TimeSpan.FromSeconds(reset):hh\\:mm}重置）" : "");
     [JsonIgnore] public string CopyText => $"{Name}\n{Path}\n{Date}\n{Summary}\n{Source}" + (Note.Length == 0 ? "" : "\n" + Note);
     private string Format(string stamp)
@@ -71,6 +73,46 @@ public sealed class LaunchRecord
         var date = DateTime.ParseExact(stamp, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
         int days = (date.Date - DateTime.ParseExact(Date, "yyyy-MM-dd", CultureInfo.InvariantCulture)).Days;
         return days == 0 ? date.ToString("HH:mm:ss") : days == 1 ? "次日 " + date.ToString("HH:mm:ss") : stamp;
+    }
+    internal static List<LaunchRecord> Merge(IEnumerable<LaunchRecord> records)
+    {
+        static DateTime Stamp(string value) => DateTime.ParseExact(value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        static string Key(LaunchRecord record)
+        {
+            if (record.GameKey.Length > 0) return record.GameKey;
+            try { return System.IO.Path.GetFullPath(record.Path); } catch { return record.Path; }
+        }
+        var result = new List<LaunchRecord>();
+        foreach (var game in records.GroupBy(Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var parts = new List<LaunchRecord>(); DateTime end = default;
+            void Flush()
+            {
+                if (parts.Count == 0) return;
+                var first = parts[0];
+                bool running = parts.Any(p => p.EndTime.Length == 0 && p.Note == "运行中");
+                var notes = parts.Select(p => p.Note).Where(n => n.Length > 0 && n != "运行中").Distinct().ToList();
+                if (parts.Count > 1) notes.Add($"已合并 {parts.Count} 段记录");
+                if (running) notes.Add("运行中");
+                result.Add(new LaunchRecord
+                {
+                    Id = first.Id, Name = first.Name, Path = first.Path, Time = first.Time, Date = first.Date, ResetSeconds = first.ResetSeconds,
+                    EndTime = running || parts.All(p => p.EndTime.Length == 0) ? "" : end.ToString("yyyy-MM-dd HH:mm:ss"),
+                    Source = string.Join("、", parts.Select(p => p.Source).Distinct()), Note = string.Join(" · ", notes), GameKey = game.Key, LastObservedAt = end
+                });
+                parts.Clear();
+            }
+            foreach (var record in game.OrderBy(p => p.Time, StringComparer.Ordinal).ThenBy(p => p.Date, StringComparer.Ordinal))
+            {
+                DateTime start = Stamp(record.Time);
+                if (parts.Count > 0 && start - end >= TimeSpan.FromMinutes(5)) Flush();
+                DateTime observed = record.EndTime.Length > 0 ? Stamp(record.EndTime) : record.LastObservedAt ?? start;
+                end = parts.Count == 0 || observed > end ? observed : end;
+                parts.Add(record);
+            }
+            Flush();
+        }
+        return result.OrderBy(p => p.Time, StringComparer.Ordinal).ToList();
     }
 }
 public sealed record Activity(DateTime Time, string Message)

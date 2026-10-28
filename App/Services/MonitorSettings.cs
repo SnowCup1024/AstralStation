@@ -26,7 +26,7 @@ public sealed class MonitorSettings : UserControl
         panel.Children.Add(new TextBlock { Text = "今日队列中的游戏会自动加入，也可手动或推荐添加。每 30 秒检测进程，全部监测记录自动进入运行日历；关闭主应用后继续记录，不改变今日任务进度。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(enabled); panel.Children.Add(status);
         panel.Children.Add(steamLink);
-        panel.Children.Add(new TextBlock { Text = "开启联动时自动使用 Steam 启动国服中已保存的实际游戏路径，无需重复添加；也会开启后台监测。Steam 启动选项仍需手动粘贴。其他入口启动终末地也会唤起 Steam，无窗口等待进程跟随游戏结束。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "开启联动时自动使用 Steam 启动国服中已保存的实际游戏路径，也会开启后台监测。其他入口启动终末地时唤起 Steam 并只接管计时，不打开或关闭官方启动器。Steam 启动选项仍需手动粘贴。", FontSize = 13, TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(steamState);
         var cancelSteam = new Button { Content = "取消 Steam 启动等待" };
         cancelSteam.Click += async (_, _) => await Guard(async () =>
