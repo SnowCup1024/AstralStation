@@ -1,5 +1,5 @@
-#ifndef SourcePath
-  #error SourcePath is required
+#ifndef FileListPath
+  #error FileListPath is required
 #endif
 #ifndef OutputPath
   #error OutputPath is required
@@ -40,19 +40,20 @@ UninstallDisplayIcon={app}\AstralStation.exe
 UninstallDisplayName=星间驿站
 WizardStyle=modern
 Compression=lzma2/normal
-SolidCompression=yes
+SolidCompression=no
 CloseApplications=yes
 RestartApplications=no
 AppMutex=Local\AstralStation.SteamLaunch.4732690
+SetupMutex=Local\AstralStation.Setup
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
-[Files]
-Source: "{#SourcePath}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#include FileListPath
 
 [Registry]
 Root: HKCU; Subkey: "Software\AstralStation"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\AstralStation"; ValueType: string; ValueName: "InstallVersion"; ValueData: "{#DisplayVersion}"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{userprograms}\星间驿站\星间驿站"; Filename: "{app}\AstralStation.exe"
@@ -64,6 +65,29 @@ var
   DeleteUserData: Boolean;
   ClosingProcesses: array of THandle;
   CloseRequestFailed: Boolean;
+  InstallMode, PreviousVersion: String;
+  CheckedFiles, ChangedFiles: TStringList;
+
+function NeedsFile(Relative, Expected: String): Boolean;
+var
+  Filename: String;
+begin
+  Filename := ExpandConstant('{app}\') + Relative;
+  if CheckedFiles.IndexOf(Filename) >= 0 then begin
+    Result := ChangedFiles.IndexOf(Filename) >= 0;
+    Exit;
+  end;
+  Result := True;
+  if FileExists(Filename) then
+    try
+      Result := CompareText(GetSHA256OfFile(Filename), Expected) <> 0;
+    except
+      Log('Unable to compare file; let the installer repair it: ' + Filename);
+    end;
+  CheckedFiles.Add(Filename);
+  if Result then begin ChangedFiles.Add(Filename); Log('Install changed or missing file: ' + Relative); end
+  else Log('Keep identical file: ' + Relative);
+end;
 
 function GetFileAttributes(Name: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
@@ -143,10 +167,52 @@ begin
 end;
 
 function InitialDirectory(Param: String): String;
+var
+  Registered: String;
 begin
   Result := '';
+  { The standard AppId registration also covers a missing executable needing repair. }
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\AstralStation_is1', 'InstallLocation', Registered) then
+    if DirExists(Registered) then begin Result := Registered; Exit; end;
   if RegQueryStringValue(HKCU, 'Software\AstralStation', 'InstallDir', Result) then
-    if not FileExists(AddBackslash(Result) + 'AstralStation.exe') then Result := '';
+    if not FileExists(AddBackslash(Result) + 'AstralStation.exe') and
+      not FileExists(AddBackslash(Result) + 'unins000.exe') then Result := '';
+end;
+
+function SameDirectory(Left, Right: String): Boolean;
+begin
+  Result := (Left <> '') and (Right <> '') and
+    (CompareText(RemoveBackslashUnlessRoot(ExpandFileName(Left)), RemoveBackslashUnlessRoot(ExpandFileName(Right))) = 0);
+end;
+
+procedure DetectInstallMode(Directory: String);
+var
+  Registered: String;
+  Installed, Current: Int64;
+begin
+  InstallMode := '全新安装'; PreviousVersion := '';
+  if Directory = '' then Exit;
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\AstralStation_is1', 'InstallLocation', Registered) and SameDirectory(Directory, Registered) then
+    RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\AstralStation_is1', 'DisplayVersion', PreviousVersion);
+  if (PreviousVersion = '') and RegQueryStringValue(HKCU, 'Software\AstralStation', 'InstallDir', Registered) and SameDirectory(Directory, Registered) then
+    RegQueryStringValue(HKCU, 'Software\AstralStation', 'InstallVersion', PreviousVersion);
+  if Pos('Alpha ', PreviousVersion) = 1 then Delete(PreviousVersion, 1, 6);
+  if PreviousVersion <> '' then begin
+    if StrToVersion(PreviousVersion, Installed) and StrToVersion('{#DisplayVersion}', Current) then begin
+      if ComparePackedVersion(Installed, Current) < 0 then InstallMode := '更新'
+      else if ComparePackedVersion(Installed, Current) = 0 then InstallMode := '修复安装'
+      else InstallMode := '禁止降级';
+    end else InstallMode := '修复现有安装';
+  end else if SameDirectory(Directory, PreviousDirectory) or
+    (FileExists(AddBackslash(Directory) + 'AstralStation.exe') and FileExists(AddBackslash(Directory) + 'unins000.exe')) then
+    InstallMode := '修复现有安装';
+end;
+
+function InstallDescription: String;
+begin
+  Result := InstallMode;
+  if PreviousVersion <> '' then Result := Result + '：Alpha ' + PreviousVersion + ' → Alpha {#DisplayVersion}';
+  Result := Result + #13#10 + '只安装新增、内容有变化或需要修复的文件，相同文件保持原样。';
 end;
 
 function InitializeSetup: Boolean;
@@ -158,21 +224,41 @@ end;
 
 procedure DirectoryChanged(Sender: TObject);
 begin
+  CheckedFiles.Clear; ChangedFiles.Clear;
   if WizardForm.CurPageID = wpSelectDir then
     WizardForm.NextButton.Enabled := Trim(WizardForm.DirEdit.Text) <> '';
 end;
 
 procedure InitializeWizard;
 begin
+  CheckedFiles := TStringList.Create; CheckedFiles.Sorted := True;
+  ChangedFiles := TStringList.Create; ChangedFiles.Sorted := True;
   PreviousDirectory := InitialDirectory('');
+  DetectInstallMode(PreviousDirectory);
   { Never use /DIR or a framework fallback as a first-install selection. }
   WizardForm.DirEdit.Text := PreviousDirectory;
   WizardForm.DirEdit.OnChange := @DirectoryChanged;
+  WizardForm.WelcomeLabel2.Caption := InstallDescription + #13#10#13#10 + WizardForm.WelcomeLabel2.Caption;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if CheckedFiles <> nil then CheckedFiles.Free;
+  if ChangedFiles <> nil then ChangedFiles.Free;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpSelectDir then DirectoryChanged(nil);
+  if CurPageID = wpReady then begin
+    if InstallMode = '更新' then WizardForm.NextButton.Caption := '更新(&U)'
+    else if Pos('修复', InstallMode) = 1 then WizardForm.NextButton.Caption := '修复(&R)';
+  end;
+end;
+
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  Result := InstallDescription + NewLine + NewLine + MemoDirInfo + NewLine + MemoGroupInfo + MemoTasksInfo;
 end;
 
 function InsideOrEqual(Path, Root: String): Boolean;
@@ -202,6 +288,13 @@ begin
     MsgBox('更新请使用已有安装目录。若要更换位置，请先卸载并保留数据，再重新安装。', mbInformation, MB_OK);
     Result := False;
   end;
+  if Result then begin
+    DetectInstallMode(Selected);
+    if InstallMode = '禁止降级' then begin
+      MsgBox('已安装 Alpha ' + PreviousVersion + '，不能使用旧版安装器覆盖新版。', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -209,6 +302,8 @@ var
   LegacyDirectory: String;
 begin
   Result := '';
+  DetectInstallMode(ExpandConstant('{app}'));
+  if InstallMode = '禁止降级' then begin Result := '检测到更新版本，已停止安装以避免降级。'; Exit; end;
   if RegQueryStringValue(HKCU,
     'Software\Microsoft\Windows\CurrentVersion\Uninstall\SnowCup1024.AstralStation',
     'InstallLocation', LegacyDirectory) and
@@ -217,6 +312,8 @@ begin
     Exit;
   end;
   Result := PrepareApplication(False);
+  { Recheck after the application has completed its shutdown/handoff. }
+  CheckedFiles.Clear; ChangedFiles.Clear;
 end;
 
 function ChooseUninstallData: Boolean;

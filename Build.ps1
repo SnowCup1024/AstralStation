@@ -36,7 +36,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '应用发布失败。' }
     dotnet publish Monitor/AstralStation.Monitor.csproj -c Release -r win-x64 --self-contained true -o (Join-Path $stage 'Monitor')
     if ($LASTEXITCODE -ne 0) { throw '后台发布失败。' }
-    & $InnoCompiler ('/DSourcePath='+$stage) ('/DOutputPath='+$release) ('/DDisplayVersion='+$display) ('/DFileVersion=1.0.0.'+$revision) ('/DAppIcon='+(Join-Path $PSScriptRoot 'App/Assets/App.ico')) (Join-Path $PSScriptRoot 'Installer/Setup.iss')
+    # Give Inno Setup the identity of each packaged file, so its native Check callback
+    # can skip identical installed files before decompressing or replacing them.
+    $fileList = Join-Path $buildRoot 'Stage/Files.iss'
+    $entries = [Collections.Generic.List[string]]::new()
+    $entries.Add('[Files]')
+    foreach ($file in Get-ChildItem -LiteralPath $stage -File -Recurse | Sort-Object FullName) {
+        $relative = [IO.Path]::GetRelativePath($stage, $file.FullName)
+        $folder = [IO.Path]::GetDirectoryName($relative)
+        $destination = if ($folder) { '{app}\' + $folder } else { '{app}' }
+        $digest = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $argument = $relative.Replace("'", "''")
+        $entries.Add(('Source: "{0}"; DestDir: "{1}"; Flags: ignoreversion; Check: NeedsFile(''{2}'', ''{3}'')' -f $file.FullName, $destination, $argument, $digest))
+    }
+    $entries.Add('[Dirs]')
+    foreach ($folder in Get-ChildItem -LiteralPath $stage -Directory -Recurse) {
+        if (@(Get-ChildItem -LiteralPath $folder.FullName -Force).Count -eq 0) {
+            $entries.Add('Name: "{app}\' + [IO.Path]::GetRelativePath($stage, $folder.FullName) + '"')
+        }
+    }
+    [IO.File]::WriteAllLines($fileList, $entries, [Text.UTF8Encoding]::new($false))
+    & $InnoCompiler ('/DFileListPath='+$fileList) ('/DOutputPath='+$release) ('/DDisplayVersion='+$display) ('/DFileVersion=1.0.0.'+$revision) ('/DAppIcon='+(Join-Path $PSScriptRoot 'App/Assets/App.ico')) (Join-Path $PSScriptRoot 'Installer/Setup.iss')
     if ($LASTEXITCODE -ne 0) { throw '安装器构建失败。' }
     Get-Item -LiteralPath (Join-Path $release ('AstralStation-Alpha-'+$display+'-Setup.exe')) | Select-Object FullName,Length
 } finally { Pop-Location }
