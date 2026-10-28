@@ -26,7 +26,7 @@ using var cancellation = new CancellationTokenSource();
 var engine = new MonitorEngine(root);
 var server = Serve();
 try { await engine.Run(cancellation.Token); }
-catch (Exception ex) { engine.Error = ex.Message; }
+catch (Exception ex) { engine.Error = ex.Message; Environment.ExitCode = 1; }
 finally { cancellation.Cancel(); try { await server; } catch (OperationCanceledException) { } }
 
 async Task Serve()
@@ -58,15 +58,16 @@ internal sealed class MonitorEngine(string root)
     private List<MonitorRecord> active = [];
     private DateTimeOffset checkpoint;
     private bool loaded, recovered;
-    private readonly SteamLinkController steam = new();
+    private readonly SteamLinkController steam = new(readConfig: () => MonitorData.ReadConfig(root));
     private readonly int sessionId = CurrentSession();
     private static int CurrentSession() { using var current = Process.GetCurrentProcess(); return current.SessionId; }
     public string? Error { get; set; }
     private readonly string version = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
-    public MonitorStatus Status => new(version, Environment.ProcessId, DateTimeOffset.Now, active.Count, Error, steam.State);
+    private MonitorStatus? status;
+    public MonitorStatus Status => Volatile.Read(ref status) ?? new(version, Environment.ProcessId, default, 0, Error, null);
     public async Task Run(CancellationToken cancellation)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         try
         {
             do
@@ -86,9 +87,11 @@ internal sealed class MonitorEngine(string root)
                     }
                     var config = MonitorData.ReadConfig(root);
                     if (!config.Enabled) break;
-                    await Tick(config); Error = null;
+                    await Tick(config, cancellation); Error = null;
                 }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { break; }
                 catch (Exception ex) { Error = "监测暂停，可在设置检查数据或权限：" + ex.Message; }
+                Volatile.Write(ref status, new(version, Environment.ProcessId, DateTimeOffset.Now, active.Count, Error, steam.State));
             } while (await timer.WaitForNextTickAsync(cancellation));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -102,35 +105,42 @@ internal sealed class MonitorEngine(string root)
             }
         }
     }
-    private async Task Tick(MonitorConfig config)
+    private async Task Tick(MonitorConfig config, CancellationToken cancellation)
     {
         var now = DateTimeOffset.Now;
         var found = new Dictionary<(string Game, int Pid, long Created), MonitorGame>();
         var uncertain = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in config.Games.Concat(active.Select(r => r.Game)).DistinctBy(g => g.Id).GroupBy(g => g.ProcessName, StringComparer.OrdinalIgnoreCase))
-        foreach (var process in Process.GetProcessesByName(group.Key))
+        var selected = config.Games.ToDictionary(g => g.Id);
+        var groups = config.Games.Concat(active.Select(r => r.Game)).DistinctBy(g => g.Id)
+            .GroupBy(g => g.ProcessName, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.OrdinalIgnoreCase);
+        // GetProcessesByName enumerates the system too. One snapshot serves every selected game.
+        foreach (var process in groups.Count == 0 ? Array.Empty<Process>() : Process.GetProcesses())
         {
             using (process)
             {
+                string? name = null;
                 try
                 {
+                    name = process.ProcessName;
+                    if (!groups.TryGetValue(name, out var group)) continue;
                     if (process.SessionId != sessionId) continue;
                     var handle = OpenProcess(0x1000, false, process.Id);
-                    if (handle == 0) { if (!process.HasExited) uncertain.Add(group.Key); continue; }
+                    if (handle == 0) { if (!process.HasExited) uncertain.Add(name); continue; }
                     try
                     {
                         var path = new StringBuilder(32768); int length = path.Capacity;
                         if (!QueryFullProcessImageNameW(handle, 0, path, ref length) || !GetProcessTimes(handle, out long created, out _, out _, out _))
-                        { uncertain.Add(group.Key); continue; }
+                        { uncertain.Add(name); continue; }
                         string actualPath = path.ToString();
-                        var game = group.Where(g => config.Games.Any(selected => selected.Id == g.Id) && (g.Path.Length == 0 || string.Equals(g.Path, actualPath, StringComparison.OrdinalIgnoreCase)))
+                        var game = group.Where(g => selected.ContainsKey(g.Id) && (g.Path.Length == 0 || string.Equals(g.Path, actualPath, StringComparison.OrdinalIgnoreCase)))
                             .OrderBy(g => g.Path.Length == 0).ThenBy(g => g.FromQueue).FirstOrDefault();
                         if (game is not null)
                             found[(game.Id, process.Id, created)] = new MonitorGame { Id = game.Id, Path = actualPath, ProcessName = game.ProcessName, DisplayName = game.DisplayName, QueueTaskId = game.QueueTaskId };
                     }
                     finally { CloseHandle(handle); }
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { uncertain.Add(group.Key); }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+                { if (name is not null && groups.ContainsKey(name)) uncertain.Add(name); }
             }
         }
         bool changed = false;
@@ -143,15 +153,16 @@ internal sealed class MonitorEngine(string root)
             // A crash/reboot has no exact exit event. Preserve the last observed time, never invent offline playtime.
             Finish(record, recovered ? now : record.LastSeenAt, recovered ? "进程退出" : "监测中断后恢复，退出时间按最后观测记录"); changed = true;
         }
+        var existing = active.Select(r => (r.Game.Id, r.ProcessId, r.CreatedUtcTicks)).ToHashSet();
         foreach (var pair in found)
         {
-            if (!config.Games.Any(g => g.Id == pair.Key.Game) || active.Any(r => r.Game.Id == pair.Key.Game && r.ProcessId == pair.Key.Pid && r.CreatedUtcTicks == pair.Key.Created)) continue;
+            if (existing.Contains(pair.Key)) continue;
             var record = new MonitorRecord { Game = pair.Value, ProcessId = pair.Key.Pid, CreatedUtcTicks = pair.Key.Created, StartedAt = now, LastSeenAt = now };
             MonitorData.Atomic(MonitorData.RecordPath(root, record), record); active.Add(record); changed = true;
         }
         recovered = true;
-        if (changed || now - checkpoint >= TimeSpan.FromSeconds(10)) Checkpoint();
-        await steam.Tick(config, found.Values.ToArray(), uncertain.Contains("Endfield"), now);
+        if (changed || (active.Count > 0 && now - checkpoint >= TimeSpan.FromSeconds(30))) Checkpoint();
+        await steam.Tick(config, found.Values.ToArray(), uncertain.Contains("Endfield"), now, cancellation);
         if (uncertain.Count > 0) throw new IOException("无法确认进程路径或身份：" + string.Join("、", uncertain) + "。不会误记为游戏退出。");
     }
     private void Finish(MonitorRecord record, DateTimeOffset end, string reason)

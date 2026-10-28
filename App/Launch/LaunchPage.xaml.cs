@@ -27,6 +27,7 @@ public sealed partial class LaunchPage : UserControl
         LibraryList.ItemsSource = library;
         QueueList.PointerPressed += ClearEmptySelection; LibraryList.PointerPressed += ClearEmptySelection;
         session.Changed += Refresh; session.TasksChanged += Reload;
+        Loaded += (_, _) => Refresh();
         ready = true; Reload();
     }
     private void Reload()
@@ -40,7 +41,7 @@ public sealed partial class LaunchPage : UserControl
     }
     private void Refresh()
     {
-        if (!ready) return;
+        if (!ready || !IsLoaded) return;
         int total = session.Store.Tasks.Count, done = session.Store.Tasks.Count(t => session.Store.Done(t, DateTime.Now));
         Summary.Text = $"{done} / {total}  今日已完成"; Progress.SetProgress(total == 0 ? 0 : (double)done / total);
         var display = session.Scheduler.QueueDisplay;

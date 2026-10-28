@@ -15,6 +15,7 @@ public sealed class LaunchStore
     private Dictionary<string, string> state = [];
     public string? Error { get; private set; }
     public int Revision { get; private set; }
+    private readonly Dictionary<string, (long Written, long Length, bool HasRecords, string? Error)> historyIndex = [];
     public LaunchStore(string root)
     {
         Root = root;
@@ -106,12 +107,27 @@ public sealed class LaunchStore
     {
         var dates = new List<string>(); var errors = new List<string>(); string folder = FileAt("History");
         if (!Directory.Exists(folder)) return (dates, errors);
+        var seen = new HashSet<string>();
         foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
         {
             var date = System.IO.Path.GetFileNameWithoutExtension(file);
             if (!ValidDate(date)) continue;
-            try { if (Records(date).Count > 0) dates.Add(date); } catch (Exception ex) { errors.Add(date + "：" + ex.Message); }
+            seen.Add(date);
+            try
+            {
+                var info = new FileInfo(file);
+                if (!historyIndex.TryGetValue(date, out var item) || item.Error is not null || item.Written != info.LastWriteTimeUtc.Ticks || item.Length != info.Length)
+                {
+                    bool hasRecords = false; string? error = null;
+                    try { hasRecords = Records(date).Count > 0; } catch (Exception ex) { error = ex.Message; }
+                    historyIndex[date] = item = (info.LastWriteTimeUtc.Ticks, info.Length, hasRecords, error);
+                }
+                if (item.Error is not null) errors.Add(date + "：" + item.Error);
+                else if (item.HasRecords) dates.Add(date);
+            }
+            catch (Exception ex) { errors.Add(date + "：" + ex.Message); }
         }
+        foreach (var date in historyIndex.Keys.Where(date => !seen.Contains(date)).ToArray()) historyIndex.Remove(date);
         dates.Sort(StringComparer.Ordinal); return (dates, errors);
     }
     public string RecordLaunch(LaunchTask task, DateTime launchedAt)

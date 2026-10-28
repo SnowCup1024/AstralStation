@@ -9,6 +9,7 @@ namespace AstralStation.Services;
 
 public sealed class MonitorClient(string root)
 {
+    private readonly SemaphoreSlim lifecycle = new(1, 1);
     public string SteamConfigPath
     {
         get
@@ -61,6 +62,12 @@ public sealed class MonitorClient(string root)
     }
     public async Task Stop()
     {
+        await lifecycle.WaitAsync();
+        try { await StopCore(); }
+        finally { lifecycle.Release(); }
+    }
+    private async Task StopCore()
+    {
         var status = await Status(); if (status is null) return;
         await Send(2);
         try
@@ -68,10 +75,17 @@ public sealed class MonitorClient(string root)
             using var worker = Process.GetProcessById(status.ProcessId);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
             await worker.WaitForExitAsync(timeout.Token);
+            if (worker.ExitCode != 0) throw new IOException("后台退出时记录保存失败，请检查监测数据后重试。");
         }
         catch (ArgumentException) { }
     }
     public async Task EnsureStarted()
+    {
+        await lifecycle.WaitAsync();
+        try { await StartCore(); }
+        finally { lifecycle.Release(); }
+    }
+    private async Task StartCore()
     {
         if (!MonitorData.ReadConfig(root).Enabled) return;
         if (!File.Exists(Executable)) throw new FileNotFoundException("后台监测程序缺失，请重新安装。", Executable);
@@ -80,7 +94,7 @@ public sealed class MonitorClient(string root)
         if (status is not null)
         {
             if (DesktopHost.CompareVersions(status.Version, version) >= 0) return;
-            await Stop();
+            await StopCore();
         }
         using var process = Process.Start(new ProcessStartInfo(Executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden, ArgumentList = { "--data-dir", root } });
         for (int attempt = 0; attempt < 12; attempt++)
@@ -123,5 +137,23 @@ public sealed class MonitorClient(string root)
         string prefix = DesktopHost.Quote(Executable) + " --data-dir ";
         foreach (var name in key?.GetValueNames() ?? [])
             if (name.StartsWith("AstralStation.Monitor-", StringComparison.Ordinal) && key!.GetValue(name) is string command && command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) key.DeleteValue(name, false);
+    }
+    public static async Task StopForInstaller()
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MonitorData.DefaultRoot };
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+        {
+            string prefix = DesktopHost.Quote(Executable) + " --data-dir ";
+            foreach (string name in key?.GetValueNames() ?? [])
+            {
+                if (!name.StartsWith("AstralStation.Monitor-", StringComparison.Ordinal) || key!.GetValue(name) is not string command
+                    || !command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                string argument = command[prefix.Length..];
+                // Registration always uses Quote. Accept only commands that round-trip exactly.
+                string candidate = argument.Trim('"');
+                if (Path.IsPathFullyQualified(candidate) && DesktopHost.Quote(candidate) == argument && MonitorData.Identity(candidate) == name) roots.Add(candidate);
+            }
+        }
+        foreach (string dataRoot in roots) await new MonitorClient(dataRoot).Stop();
     }
 }

@@ -58,16 +58,89 @@ Root: HKCU; Subkey: "Software\AstralStation"; ValueType: string; ValueName: "Ins
 Name: "{userprograms}\星间驿站\星间驿站"; Filename: "{app}\AstralStation.exe"
 Name: "{userprograms}\星间驿站\卸载星间驿站"; Filename: "{uninstallexe}"
 
-[UninstallRun]
-Filename: "{app}\AstralStation.exe"; Parameters: "--installer-uninstall"; Flags: runhidden skipifdoesntexist; RunOnceId: "CleanupStartup"
-
 [Code]
 var
   PreviousDirectory: String;
   DeleteUserData: Boolean;
+  ClosingProcesses: array of THandle;
+  CloseRequestFailed: Boolean;
 
 function GetFileAttributes(Name: String): LongWord;
   external 'GetFileAttributesW@kernel32.dll stdcall';
+function EnumWindows(Callback, Param: NativeInt): BOOL;
+  external 'EnumWindows@user32.dll stdcall';
+function GetProp(Window: HWND; Name: String): THandle;
+  external 'GetPropW@user32.dll stdcall';
+function GetWindowThreadProcessId(Window: HWND; var ProcessId: Cardinal): Cardinal;
+  external 'GetWindowThreadProcessId@user32.dll stdcall';
+function OpenProcess(Access: Cardinal; Inherit: BOOL; ProcessId: Cardinal): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function QueryFullProcessImageName(Process: THandle; Flags: Cardinal; Path: String; var Size: Cardinal): BOOL;
+  external 'QueryFullProcessImageNameW@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: Cardinal): Cardinal;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function RequestWindowExit(Window: HWND; Param: NativeInt): BOOL;
+var
+  ProcessId, Size: Cardinal;
+  Process: THandle;
+  Path: String;
+  Count: Integer;
+begin
+  Result := True;
+  if GetProp(Window, 'AstralStation.UpgradeProtocol') = 0 then Exit;
+  GetWindowThreadProcessId(Window, ProcessId);
+  Process := OpenProcess($1000 or $100000, False, ProcessId);
+  if Process = 0 then Exit;
+  Size := 32768;
+  SetLength(Path, Size);
+  if QueryFullProcessImageName(Process, 0, Path, Size) then begin
+    SetLength(Path, Size);
+    if CompareText(Path, ExpandConstant('{app}\AstralStation.exe')) = 0 then begin
+      { The existing upgrade protocol saves running tasks and bypasses close-to-tray. }
+      if not PostMessage(Window, RegisterWindowMessage('AstralStation.Upgrade'), 0, 0) then
+        CloseRequestFailed := True;
+      Count := GetArrayLength(ClosingProcesses);
+      SetArrayLength(ClosingProcesses, Count + 1);
+      ClosingProcesses[Count] := Process;
+      Exit;
+    end;
+  end;
+  CloseHandle(Process);
+end;
+
+function PrepareApplication(Uninstalling: Boolean): String;
+var
+  I, Code: Integer;
+  Command: String;
+begin
+  Result := '';
+  if CheckForMutexes('Local\AstralStation.SteamLaunch.4732690') then begin
+    Result := 'Steam 等待进程仍在运行，请结束游戏或取消启动等待后重试。';
+    Exit;
+  end;
+  CloseRequestFailed := False;
+  SetArrayLength(ClosingProcesses, 0);
+  try
+    if not EnumWindows(CreateCallback(@RequestWindowExit), 0) then CloseRequestFailed := True;
+    for I := 0 to GetArrayLength(ClosingProcesses) - 1 do
+      if WaitForSingleObject(ClosingProcesses[I], 10000) <> 0 then CloseRequestFailed := True;
+  finally
+    for I := 0 to GetArrayLength(ClosingProcesses) - 1 do CloseHandle(ClosingProcesses[I]);
+    SetArrayLength(ClosingProcesses, 0);
+  end;
+  if CloseRequestFailed then begin
+    Result := '星间驿站尚未退出。请完成或关闭程序内的弹窗，检查记录保存错误后重试；不会强制结束游戏或程序。';
+    Exit;
+  end;
+  if Uninstalling then Command := '--installer-uninstall' else Command := '--installer-prepare';
+  if FileExists(ExpandConstant('{app}\AstralStation.exe')) then
+    if not Exec(ExpandConstant('{app}\AstralStation.exe'), Command,
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      Result := '后台尚未安全退出，请检查程序权限和记录保存情况后重试。';
+end;
 
 function InitialDirectory(Param: String): String;
 begin
@@ -134,7 +207,6 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   LegacyDirectory: String;
-  Code: Integer;
 begin
   Result := '';
   if RegQueryStringValue(HKCU,
@@ -144,10 +216,7 @@ begin
     Result := '请先卸载旧版一键安装程序，并保留数据，然后再安装此版本。';
     Exit;
   end;
-  if FileExists(ExpandConstant('{app}\AstralStation.exe')) then
-    if not Exec(ExpandConstant('{app}\AstralStation.exe'), '--installer-prepare',
-      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-      Result := '后台或 Steam 等待进程尚未退出，请结束游戏、退出星间驿站后重试。';
+  Result := PrepareApplication(False);
 end;
 
 function ChooseUninstallData: Boolean;
@@ -210,11 +279,18 @@ begin
 end;
 
 function InitializeUninstall: Boolean;
+var
+  Error: String;
 begin
   { Silent uninstall can never opt in to data deletion. }
   DeleteUserData := False;
   if UninstallSilent then Result := True
   else Result := ChooseUninstallData;
+  if Result then begin
+    Error := PrepareApplication(True);
+    Result := Error = '';
+    if not Result then MsgBox(Error, mbError, MB_OK);
+  end;
 end;
 
 function ContainsLink(const Root: String): Boolean;

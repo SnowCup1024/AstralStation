@@ -107,13 +107,13 @@ internal sealed class SteamSession(string configPath)
     }
 }
 
-internal sealed class SteamLinkController(Action<string>? request = null)
+internal sealed class SteamLinkController(Action<string>? request = null, Func<MonitorConfig>? readConfig = null)
 {
     private DateTimeOffset? detected;
     private DateTimeOffset retryAfter;
     private int attempts;
     public string? State { get; private set; }
-    public async Task Tick(MonitorConfig config, IReadOnlyCollection<MonitorGame> present, bool uncertain, DateTimeOffset now)
+    public async Task Tick(MonitorConfig config, IReadOnlyCollection<MonitorGame> present, bool uncertain, DateTimeOffset now, CancellationToken cancellation = default)
     {
         if (!config.SteamLinkEnabled) { Reset(); return; }
         try
@@ -126,8 +126,19 @@ internal sealed class SteamLinkController(Action<string>? request = null)
             var bridge = await SteamBridge.Query(config.SteamLinkConfigPath);
             if (bridge is not null) { State = bridge.Error ?? "Steam 等待进程持续运行中 · " + bridge.State; return; }
             if (SteamBridge.Running) { State = "已有 Steam 等待进程，正在等待登记；旧版脚本运行期间不重复启动。"; return; }
-            detected ??= now;
-            if ((now - detected.Value).TotalSeconds < 3) { State = "已检测到终末地，等待 Steam 启动进程登记…"; return; }
+            if (detected is null)
+            {
+                detected = now;
+                // Preserve the short Steam registration grace without another full process scan.
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellation);
+                if (SteamBridge.Running) return;
+                var confirmed = SteamBridge.Find(runtime.GamePath);
+                if (confirmed.Uncertain || confirmed.Processes.Count == 0) return;
+                var current = readConfig?.Invoke() ?? config;
+                if (!current.Enabled || !current.SteamLinkEnabled || current.SteamLinkConfigPath != config.SteamLinkConfigPath
+                    || !current.Games.Any(g => string.Equals(g.Path, runtime.GamePath, StringComparison.OrdinalIgnoreCase))) return;
+                now = DateTimeOffset.Now;
+            }
             if (attempts >= 2) { State = "Steam 等待进程未出现，本次运行已停止重试。请检查 Steam 启动选项。"; return; }
             if (now < retryAfter) { State = "已请求 Steam 启动，正在等待进程登记…"; return; }
             var setup = new SteamLaunch(Path.GetDirectoryName(config.SteamLinkConfigPath));
@@ -138,6 +149,7 @@ internal sealed class SteamLinkController(Action<string>? request = null)
             else using (Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden })) { }
             State = "已请求 Steam 启动，等待进程将自动跟随游戏退出。";
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
         catch (Exception ex) { State = "Steam 联动暂停：" + ex.Message; }
     }
     private void Reset() { detected = null; retryAfter = default; attempts = 0; State = null; }

@@ -14,7 +14,7 @@ internal static class Program
             try
             {
                 Monitoring.SteamBridge.RequireIdle();
-                new Services.MonitorClient(Monitoring.MonitorData.DefaultRoot).Stop().GetAwaiter().GetResult();
+                Services.MonitorClient.StopForInstaller().GetAwaiter().GetResult();
                 if (arguments.Contains("--installer-uninstall"))
                 { Services.MonitorClient.RemoveLogin(); Services.DesktopHost.RemoveDefaultLogin(); }
             }
